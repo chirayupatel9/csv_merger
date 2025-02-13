@@ -117,5 +117,7 @@ def strip_vendor(strings):
 
 # Example usage
 if __name__ == "__main__":
-    folder_path = input("Enter the folder path containing CSV files: ")
-    read_all_csv_from_folder(folder_path)
+    exe_folder_path = os.path.dirname(os.path.abspath(sys.executable)) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+    data_folder_path = os.path.join(exe_folder_path, 'data')
+    print(f"Looking for CSV files in: {data_folder_path}")
+    read_all_csv_from_folder(data_folder_path)
