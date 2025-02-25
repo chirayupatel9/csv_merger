@@ -40,9 +40,14 @@ def read_all_csv_from_folder(folder_path):
     """
     Reads all CSV files from the given folder path and processes them.
     """
-    all_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.endswith('.csv')]
+    all_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.lower().endswith('.csv')]
     combined_df = pd.DataFrame()
-    
+    processed_folder = os.path.join(folder_path, 'processed_csv')
+    already_processed_folder = os.path.join(folder_path, 'already_processed')
+    not_processed_folder = os.path.join(folder_path, 'not_processed')
+    os.makedirs(processed_folder, exist_ok=True)
+    os.makedirs(already_processed_folder, exist_ok=True)
+    os.makedirs(not_processed_folder, exist_ok=True)
     for file in all_files:
         try:
             logging.info(f"Processing file: {file}")
@@ -50,14 +55,17 @@ def read_all_csv_from_folder(folder_path):
             df = csv_reader(file)
             for index, row in df.iterrows():
                 logging.info(f"Processing row {index + 1}: {row.to_dict()}")
-                print(f"Processing row {index + 1}")  # This prints to console if available
+                # print(f"Processing row {index + 1}")  # This prints to console if available
             combined_df = pd.concat([combined_df, df], ignore_index=True)
+            # combined_df = combined_df.reset_index(inplace=True, drop=True)
+            os.rename(file, os.path.join(already_processed_folder, os.path.basename(file)))  # Move processed file to another folder
         except Exception as e:
+            os.rename(file, os.path.join(not_processed_folder, os.path.basename(file)))
             logging.error(f"Error processing file {file}: {e}")
             print(f"Error processing file {file}: {e}")
     
     if not combined_df.empty:
-        output_file = os.path.join(folder_path, 'combined_output.csv')
+        output_file = os.path.join(processed_folder, 'combined_output.csv')
         combined_df.to_csv(output_file, index=False)
         print(f"Combined CSV saved at: {output_file}")
         logging.info(f"Combined CSV saved at: {output_file}")
@@ -70,20 +78,24 @@ def csv_reader(csv_file_path, read_line=0):
     Reads and processes a single CSV file.
     """
     df = mapper(csv_file_path, read_line)
-    date_columns = ['pdate', 'tdate']
+    date_columns = ["posting_date", "transaction_date"]
     
-    if 'tdate' not in df.columns:
-        df['tdate'] = df['pdate']
+    if "transaction_date" not in df.columns:
+        df["transaction_date"] = df["posting_date"]
     
     for col in date_columns:
         df[col] = df[col].apply(lambda x: convert_to_yyyy_mm_dd(x) if isinstance(x, str) else x)
     
-    if 'type' not in df.columns:
-        df['type'] = df['amount'].apply(lambda x: 'Credit' if x >= 0 else 'Debit')
-    if 'category' not in df.columns:
-        df['category'] = 'No Category Mentioned'
+    if "amount" in df.columns:
+        df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0)
     
-    df['vendorName'] = df['description'].apply(lambda x: strip_vendor(x))
+    if "type" not in df.columns and "amount" in df.columns:
+        df["type"] = df["amount"].apply(lambda x: "Credit" if x >= 0 else "Debit")
+        
+    if "category" not in df.columns:
+        df["category"] = "No Category Mentioned"
+    
+    df["vendorName"] = df["description"].apply(lambda x: strip_vendor(x))
     return df
 
 def mapper(csv_file_path, read_line=0):
@@ -93,8 +105,8 @@ def mapper(csv_file_path, read_line=0):
     header_mapping = load_header_mapping()
 
     df = pd.read_csv(csv_file_path, index_col=False, skiprows=read_line)
+    df.columns = [col.lower().replace(" ", "") for col in df.columns]
     reverse_mapping = {old_header: new_header for new_header, old_headers in header_mapping.items() for old_header in old_headers}
-    
     final_column_order = []
     new_column_names = []
     
@@ -133,12 +145,12 @@ plus_minus = r'\+\/\-'  # Plus/minus symbols
 cases = fr'({string})(?:[\s\d\-\+\/]*)(?:{key})'
 pattern = re.compile(cases)
 
-def strip_vendor(strings):
+def strip_vendor(strings="Not Available"):
     """
     Extracts vendor name from description.
     - If the extracted vendor name is less than 2 characters, take the first two words.
     """
-    if not strings:
+    if not strings or type(strings)==float:
         return "Unknown"
     
     # Ensure the input string is within a reasonable length

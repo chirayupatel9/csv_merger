@@ -1,10 +1,65 @@
 {
-    "description": ["description", "Description", "desc"],
-    "post_date": ["Posting Date", "post_date", "Post Date","Posted Date", "posted_date", "Date"],
-    "transaction_date": ["transaction date", "Transaction Date", "trans_date"],
-    "amount": ["debit/credit", "debit","Debit", "credit", "Amount"],
-    "category": ["Category", "cat"],
-    "type": ["sale_type", "Type", "details"],
-    "balance": ["bal.", "Running Bal.", "Balance"],
-    "check or slip #": ["Check or Slip #", "check or slip #", "check #", "slip #"]
+    "description": [
+        "description",
+        "desc",
+        "Details",
+        "Transaction Details",
+        "Narration",
+        "Memo",
+        "Statement Description"
+    ],
+    "posting_date": [
+        "postingdate",
+        "postdate",
+        "posteddate",
+        "date",
+        "Valuedate",
+        "Transaction Posting date"
+    ],
+    "transaction_date": [
+        "transactiondate",
+        "trans_date",
+        "Txndate",
+        "Effectivedate"
+    ],
+    "amount": [
+        "debit/credit",
+        "Debit/Credit",
+        "debit",
+        "credit",
+        "amount",
+        "transactionamount",
+        "amount(USD)",
+        "transactionvalue"
+    ],
+    "category": [
+        "category",
+        "type",
+        "transaction type",
+        "expense type",
+        "classification"
+    ],
+    "balance": [
+        "running balance",
+        "balance",
+        "current balance",
+        "available balance"
+    ],
+    "vendor": [
+        "merchant",
+        "vendor name",
+        "payee",
+        "beneficiary",
+        "company name",
+        "transaction party"
+    ],
+    "check or slip #": [
+        "checkorslip#",
+        "check#",
+        "slip#",
+        "cardno.",
+        "referencenumber",
+        "transactionid",
+        "chequenumber"
+    ]
 }
