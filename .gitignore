@@ -2,3 +2,6 @@
 data/
 build/
 main.spec
+main.exe
+main.zip
+*.txt

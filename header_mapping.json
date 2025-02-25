@@ -1,0 +1,10 @@
+{
+    "description": ["description", "Description", "desc"],
+    "post_date": ["Posting Date", "post_date", "Post Date","Posted Date", "posted_date", "Date"],
+    "transaction_date": ["transaction date", "Transaction Date", "trans_date"],
+    "amount": ["debit/credit", "debit","Debit", "credit", "Amount"],
+    "category": ["Category", "cat"],
+    "type": ["sale_type", "Type", "details"],
+    "balance": ["bal.", "Running Bal.", "Balance"],
+    "check or slip #": ["Check or Slip #", "check or slip #", "check #", "slip #"]
+}
