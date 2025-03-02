@@ -105,11 +105,38 @@ def mapper(csv_file_path, read_line=0):
     header_mapping = load_header_mapping()
 
     df = pd.read_csv(csv_file_path, index_col=False, skiprows=read_line)
+    
+    # Reset index if duplicates exist
+    if not df.index.is_unique:
+        df.reset_index(drop=True, inplace=True)
+    # Ensure column names are unique
+    df.columns = pd.io.parsers.read_csv(csv_file_path, nrows=0).columns
+    df.columns = pd.Series(df.columns).astype(str) 
+    
+    
     df.columns = [col.lower().replace(" ", "") for col in df.columns]
     reverse_mapping = {old_header: new_header for new_header, old_headers in header_mapping.items() for old_header in old_headers}
     final_column_order = []
     new_column_names = []
-    
+    credit_col = next((col for col in df.columns if 'credit' in col.lower()), None)
+    debit_col = next((col for col in df.columns if 'debit' in col.lower()), None)
+    amount_col = next((col for col in df.columns if 'amount' in col.lower()), None)
+    if credit_col and debit_col:
+        df[credit_col] = pd.to_numeric(df[credit_col], errors='coerce').fillna(0)
+        df[debit_col] = pd.to_numeric(df[debit_col], errors='coerce').fillna(0)
+        df['amount'] = df[credit_col] - df[debit_col]
+        df.drop(columns=[credit_col, debit_col], inplace=True)
+
+    elif credit_col:
+        df['amount'] = pd.to_numeric(df[credit_col], errors='coerce').fillna(0)
+        df.drop(columns=[credit_col], inplace=True)
+
+    elif debit_col:
+        df['amount'] = -pd.to_numeric(df[debit_col], errors='coerce').fillna(0)
+        df.drop(columns=[debit_col], inplace=True)
+
+    elif amount_col:
+        df['amount'] = pd.to_numeric(df[amount_col], errors='coerce').fillna(0)
     for col in df.columns:
         if col in reverse_mapping:
             final_column_order.append(col)
@@ -150,6 +177,7 @@ def strip_vendor(strings="Not Available"):
     Extracts vendor name from description.
     - If the extracted vendor name is less than 2 characters, take the first two words.
     """
+    
     if not strings or type(strings)==float:
         return "Unknown"
     
