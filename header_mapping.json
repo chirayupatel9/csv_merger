@@ -34,7 +34,6 @@
     ],
     "category": [
         "category",
-        "type",
         "transaction type",
         "expense type",
         "classification"

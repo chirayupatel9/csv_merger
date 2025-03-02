@@ -60,9 +60,9 @@ def read_all_csv_from_folder(folder_path):
             # combined_df = combined_df.reset_index(inplace=True, drop=True)
             os.rename(file, os.path.join(already_processed_folder, os.path.basename(file)))  # Move processed file to another folder
         except Exception as e:
-            os.rename(file, os.path.join(not_processed_folder, os.path.basename(file)))
-            logging.error(f"Error processing file {file}: {e}")
+            # os.rename(file, os.path.join(not_processed_folder, os.path.basename(file)))
             print(f"Error processing file {file}: {e}")
+            logging.error(f"Error processing file {file}: {e}")
     
     if not combined_df.empty:
         output_file = os.path.join(processed_folder, 'combined_output.csv')
@@ -107,13 +107,16 @@ def mapper(csv_file_path, read_line=0):
     df = pd.read_csv(csv_file_path, index_col=False, skiprows=read_line)
     
     # Reset index if duplicates exist
-    if not df.index.is_unique:
+    if df.index.is_unique:
+        print("it broke here 1")
         df.reset_index(drop=True, inplace=True)
+    else:
+        print("it broke here 2")
     # Ensure column names are unique
     df.columns = pd.io.parsers.read_csv(csv_file_path, nrows=0).columns
     df.columns = pd.Series(df.columns).astype(str) 
     
-    
+    print(df.columns)
     df.columns = [col.lower().replace(" ", "") for col in df.columns]
     reverse_mapping = {old_header: new_header for new_header, old_headers in header_mapping.items() for old_header in old_headers}
     final_column_order = []
@@ -147,6 +150,7 @@ def mapper(csv_file_path, read_line=0):
     
     df_reordered = df[final_column_order]
     df_reordered.columns = new_column_names
+    print(df_reordered.columns)
     return df_reordered
 
 def convert_to_yyyy_mm_dd(date_str):
