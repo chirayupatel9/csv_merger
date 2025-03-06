@@ -23,6 +23,7 @@
         "Effectivedate"
     ],
     "amount": [
+        "amount_temp",
         "debit/credit",
         "Debit/Credit",
         "debit",
