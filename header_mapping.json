@@ -5,8 +5,7 @@
         "Details",
         "Transaction Details",
         "Narration",
-        "Memo",
-        "Statement Description"
+        "Memo"
     ],
     "posting_date": [
         "postingdate",
@@ -26,12 +25,23 @@
         "amount_temp",
         "debit/credit",
         "Debit/Credit",
-        "debit",
-        "credit",
         "amount",
         "transactionamount",
         "amount(USD)",
         "transactionvalue"
+    ],
+    "amount_c": [
+        "amount_c",
+        "amount_credit",
+        "credit",
+        "credits"
+
+    ],
+    "amount_d": [
+        "amount_d",
+        "amount_debit",
+        "debit",
+        "debits"
     ],
     "category": [
         "category",
@@ -53,7 +63,7 @@
         "company name",
         "transaction party"
     ],
-    "check or slip #": [
+    "check#": [
         "checkorslip#",
         "check#",
         "slip#",

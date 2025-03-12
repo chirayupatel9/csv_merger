@@ -5,3 +5,5 @@ main.spec
 main.exe
 main.zip
 *.txt
+.venv/
+test.*
