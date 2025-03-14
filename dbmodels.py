@@ -1,8 +1,6 @@
-from sqlalchemy import (
-    create_engine, Column, Integer, String, DateTime, ForeignKey, Numeric, Text, Date
-)
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, Numeric, Text, Date
 from sqlalchemy.orm import relationship, declarative_base, sessionmaker
-
+from datetime import datetime
 # Database Configuration
 DATABASE_URL = "postgresql://postgres:Password#123@localhost:5432/bk_db"
 
@@ -147,20 +145,20 @@ class Roles(Base):
 
 
 
-
 class AccountTransaction(Base):
     __tablename__ = "accountTransaction"
-    transction_id = Column(Integer, primary_key=True, autoincrement=True)
+
+    transaction_id = Column(Integer, primary_key=True, autoincrement=True)
     org_id = Column(Integer, ForeignKey("organization.org_id"))
-    account_Id = Column(Integer, ForeignKey("accounts.account_Id"))
+    account_id = Column(Integer, ForeignKey("accounts.account_Id"))
     description = Column(Text)
-    vendor_id = Column(Integer, ForeignKey("vendors.vendor_id"))
+    vendor_id = Column(Integer, ForeignKey("vendor.vendor_id"))
     tran_type_id = Column(Integer, ForeignKey("TransactionType.tran_type_id"))
-    cardNum = Column(String(100))
+    card_number = Column(String(100))
     posting_date = Column(DateTime)
     transaction_date = Column(DateTime)
     amount = Column(Numeric(10, 4))
-    category = Column(String(100))
+    category = Column(String(100), ForeignKey("categories.category_id"))
     payment_date = Column(DateTime)
     due_date = Column(DateTime)
     balance_as_of_date = Column(Numeric(10, 4))
@@ -168,8 +166,8 @@ class AccountTransaction(Base):
     source_id = Column(Integer)
     created_by = Column(Integer, ForeignKey("users.user_id"))
     updated_by = Column(Integer, ForeignKey("users.user_id"))
-    created_at = Column(DateTime)
-    updated_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
 
 
 class Organization(Base):
@@ -210,8 +208,8 @@ class UserRole(Base):
     created_at = Column(DateTime)
 
 
-class Vendors(Base):
-    __tablename__ = "vendors"
+class Vendor(Base):
+    __tablename__ = "vendor"
     vendor_id = Column(Integer, primary_key=True, autoincrement=True)
     freq_Id = Column(Integer, ForeignKey("frequency.freq_Id"))
     vendor_name = Column(String(50))

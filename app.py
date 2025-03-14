@@ -1,72 +1,121 @@
 import streamlit as st
 import pandas as pd
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import NoResultFound
+from datetime import datetime
 import main
+from dbmodels import SessionLocal, AccountTransaction, Vendor, TransactionType, Categories, Accounts, Organization, Users, AccountTransaction
+import numpy as np
 
-st.title("CSV Data Processor & Pivot Table")
+st.title("CSV Processor (Store Merged Data in Relational DB)")
+
+# Function to get or insert foreign key records
+def get_or_create(session, model, filter_by, defaults):
+    """Fetch foreign key record, if not found insert a new one."""
+    try:
+        record = session.query(model).filter_by(**filter_by).one()
+    except NoResultFound:
+        record = model(**{**filter_by, **defaults})
+        session.add(record)
+        session.commit()
+        session.refresh(record)
+    return record
+
+def clean_value(value):
+    """Convert NaN values to None for database insertion."""
+    return None if pd.isna(value) or value in ["", "NaN", "nan", np.nan] else value
+
+# Function to store combined CSV data into PostgreSQL (handling NaN values)
+def save_combined_csv_to_db(df):
+    """Saves Combined CSV Data into `accountTransaction` while ensuring FK constraints"""
+    session = SessionLocal()
+
+    try:
+        records = []
+        for _, row in df.iterrows():
+            # Clean NaN values
+            vendor_name = clean_value(row.get("vendorName"))
+            tran_type_name = clean_value(row.get("type"))
+            category_name = clean_value(row.get("category"))
+            account_number = clean_value(row.get("accountNumber"))
+
+            # Get or create Foreign Key relationships (handling NaN)
+            vendor = get_or_create(session, Vendor, {"vendor_name": vendor_name}, {"vendor_code": "AUTO", "vendor_description": "Added from CSV"}) if vendor_name else None
+            tran_type = get_or_create(session, TransactionType, {"tran_type": tran_type_name}, {"tran_code": 999, "tran_desc": "Auto Added"}) if tran_type_name else None
+            category = get_or_create(session, Categories, {"category_Name": category_name}, {}) if category_name else None
+            account = get_or_create(session, Accounts, {"account_Number": account_number}, {"account_Name": "Auto Created", "account_code": "AUTO"}) if account_number else None
+            org = get_or_create(session, Organization, {"org_name": "DefaultOrg"}, {"org_code": "AUTO", "org_description": "Auto Added"})
+            user = get_or_create(session, Users, {"username": "admin"}, {"name": "Admin", "password": "password"})
+
+            record = AccountTransaction(
+                org_id=org.org_id if org else None,
+                account_id=account.account_Id if account else None,
+                description=row.get("description"),
+                vendor_id=vendor.vendor_id if vendor else None,
+                tran_type_id=tran_type.tran_type_id if tran_type else None,
+                card_number=row.get("cardNumber"),
+                posting_date=row.get("posting_date"),
+                transaction_date=row.get("transaction_date"),
+                amount=row.get("amount"),
+                category=category.category_id if category else None,
+                payment_date=row.get("payment_date"),
+                due_date=row.get("due_date"),
+                balance_as_of_date=row.get("balance_as_of_date"),
+                sale_type=row.get("sale_type"),
+                source_id=row.get("source_id"),
+                created_by=user.user_id if user else None,
+                updated_by=user.user_id if user else None,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow()
+            )
+            records.append(record)
+
+        session.add_all(records)
+        session.commit()
+        st.success("Combined CSV data stored in PostgreSQL (Relational) successfully!")
+
+    except Exception as e:
+        session.rollback()
+        st.error(f"Error saving data to PostgreSQL: {e}")
+
+    finally:
+        session.close()
+
 
 # File Upload Section
-uploaded_file = st.file_uploader("Upload a CSV file", type=['csv'])
+uploaded_files = st.file_uploader("Upload Multiple CSV Files", type=['csv'], accept_multiple_files=True)
 
-if uploaded_file:
-    st.success("File uploaded successfully!")
+if uploaded_files:
+    combined_df = pd.DataFrame()
 
-    # Read and process the file
-    df = main.csv_reader(uploaded_file)
+    for file in uploaded_files:
+        df = main.csv_reader(file)
+        combined_df = pd.concat([combined_df, df], ignore_index=True)
 
-    # Show raw data preview
-    st.subheader("Processed Data Preview")
-    st.dataframe(df.head(20))
+    # Display combined data
+    st.subheader("Combined CSV Data Preview")
+    st.dataframe(combined_df.head(20))
 
-    # Pivot Table Section
-    st.subheader("Create a Pivot Table")
+    # Store combined data in PostgreSQL (Relational)
+    if st.button("Save Combined CSV Data to PostgreSQL"):
+        save_combined_csv_to_db(combined_df)
 
-    # Allow users to select index, columns, and values
-    index_col = st.multiselect("Select Index Columns", df.columns)
-    columns_col = st.multiselect("Select Columns", df.columns)
-    values_col = st.multiselect("Select Values", df.columns)
-
-    # Aggregation function with "None" as default
-    agg_funcs = ["None", "sum", "mean", "count", "min", "max"]
-    agg_func = st.selectbox("Select Aggregation Function", agg_funcs, index=0)
-
-    # Column Visibility Selection
-    st.subheader("Select Columns to Display in Pivot Table")
-    visible_columns = st.multiselect("Select Columns to Show", df.columns, default=df.columns)
-
-    if index_col:
-        try:
-            # If no aggregation is selected, use `pivot()`
-            if agg_func == "None":
-                if values_col:
-                    pivot_df = df.pivot(index=index_col, columns=columns_col, values=values_col)
-                else:
-                    pivot_df = df.pivot(index=index_col, columns=columns_col)
-            else:
-                # Use `pivot_table()` when an aggregation function is selected
-                pivot_df = pd.pivot_table(df, index=index_col, columns=columns_col, values=values_col, aggfunc=agg_func)
-
-            # Apply column visibility filter
-            pivot_df = pivot_df[visible_columns] if set(visible_columns).issubset(pivot_df.columns) else pivot_df
-
-            # Show pivot table
-            st.subheader("Pivot Table Output")
-            st.dataframe(pivot_df)
-
-            # Provide download option
-            csv_pivot = pivot_df.to_csv().encode('utf-8')
-            st.download_button(
-                label="Download Pivot Table CSV",
-                data=csv_pivot,
-                file_name="pivot_table.csv",
-                mime="text/csv"
-            )
-        except Exception as e:
-            st.error(f"Error creating Pivot Table: {e}")
-    else:
-        st.warning("Please select at least one index column for the pivot table.")
+    # Display stored data option
+    if st.button("View Stored CSV Data"):
+        session = SessionLocal()
+        query = session.query(AccountTransaction).all()
+        session.close()
+        
+        if query:
+            st.subheader("Stored CSV Data in Database")
+            stored_data = pd.DataFrame([(row.transaction_date, row.posting_date, row.vendor_id, row.amount, row.type, row.category, row.description) for row in query],
+                                       columns=["Transaction Date", "Posting Date", "Vendors", "Amount", "Type", "Category", "Description"])
+            st.dataframe(stored_data)
+        else:
+            st.warning("No data found in the database.")
 
     # Download processed data
-    csv = df.to_csv(index=False).encode('utf-8')
+    csv = combined_df.to_csv(index=False).encode('utf-8')
     st.download_button(
         label="Download Processed CSV",
         data=csv,
