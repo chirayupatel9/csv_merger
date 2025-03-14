@@ -2,10 +2,16 @@
     "description": [
         "description",
         "desc",
-        "Details",
         "Transaction Details",
         "Narration",
         "Memo"
+    ],
+    "card": [
+        "card",
+        "cardno",
+        "cardnumber",
+        "cardno.",
+        "card no"
     ],
     "posting_date": [
         "postingdate",
@@ -46,6 +52,7 @@
     "category": [
         "category",
         "transaction type",
+        "Details",
         "expense type",
         "classification"
     ],

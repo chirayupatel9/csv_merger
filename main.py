@@ -225,9 +225,9 @@ def strip_vendor(strings="Not Available"):
     return vendor_name
 
 # Example usage
-if __name__ == "__main__":
-    exe_folder_path = os.path.dirname(os.path.abspath(sys.executable)) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
-    data_folder_path = os.path.join(exe_folder_path, 'data')
-    logging.info(f"Looking for CSV files in: {data_folder_path}")
-    print(f"Looking for CSV files in: {data_folder_path}")
-    read_all_csv_from_folder(data_folder_path)
+# if __name__ == "__main__":
+#     exe_folder_path = os.path.dirname(os.path.abspath(sys.executable)) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+#     data_folder_path = os.path.join(exe_folder_path, 'data')
+#     logging.info(f"Looking for CSV files in: {data_folder_path}")
+#     print(f"Looking for CSV files in: {data_folder_path}")
+#     read_all_csv_from_folder(data_folder_path)
