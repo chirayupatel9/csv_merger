@@ -150,7 +150,7 @@ class AccountTransaction(Base):
 
     transaction_id = Column(Integer, primary_key=True, autoincrement=True)
     org_id = Column(Integer, ForeignKey("organization.org_id"))
-    account_id = Column(Integer, ForeignKey("accounts.account_Id"))
+    account_Id = Column(Integer, ForeignKey("accounts.account_Id"))  # FIXED: Matches DDL
     description = Column(Text)
     vendor_id = Column(Integer, ForeignKey("vendor.vendor_id"))
     tran_type_id = Column(Integer, ForeignKey("TransactionType.tran_type_id"))
@@ -168,6 +168,7 @@ class AccountTransaction(Base):
     updated_by = Column(Integer, ForeignKey("users.user_id"))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
+
 
 
 class Organization(Base):

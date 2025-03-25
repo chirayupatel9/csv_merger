@@ -24,8 +24,6 @@ def get_or_create(session, model, filter_by, defaults):
 def clean_value(value):
     """Convert NaN values to None for database insertion."""
     return None if pd.isna(value) or value in ["", "NaN", "nan", np.nan] else value
-
-# Function to store combined CSV data into PostgreSQL (handling NaN values)
 def save_combined_csv_to_db(df):
     """Saves Combined CSV Data into `accountTransaction` while ensuring FK constraints"""
     session = SessionLocal()
@@ -39,17 +37,22 @@ def save_combined_csv_to_db(df):
             category_name = clean_value(row.get("category"))
             account_number = clean_value(row.get("accountNumber"))
 
-            # Get or create Foreign Key relationships (handling NaN)
+            # Get or create Foreign Key relationships
             vendor = get_or_create(session, Vendor, {"vendor_name": vendor_name}, {"vendor_code": "AUTO", "vendor_description": "Added from CSV"}) if vendor_name else None
             tran_type = get_or_create(session, TransactionType, {"tran_type": tran_type_name}, {"tran_code": 999, "tran_desc": "Auto Added"}) if tran_type_name else None
             category = get_or_create(session, Categories, {"category_Name": category_name}, {}) if category_name else None
+            
+            # Handle missing account_Id
             account = get_or_create(session, Accounts, {"account_Number": account_number}, {"account_Name": "Auto Created", "account_code": "AUTO"}) if account_number else None
+            default_account = session.query(Accounts).filter_by(account_Name="Default").first()
+            account_id = account.account_Id if account else (default_account.account_Id if default_account else None)
+
             org = get_or_create(session, Organization, {"org_name": "DefaultOrg"}, {"org_code": "AUTO", "org_description": "Auto Added"})
             user = get_or_create(session, Users, {"username": "admin"}, {"name": "Admin", "password": "password"})
 
             record = AccountTransaction(
                 org_id=org.org_id if org else None,
-                account_id=account.account_Id if account else None,
+                account_Id=account_id,  # FIXED: Matches `account_Id`
                 description=row.get("description"),
                 vendor_id=vendor.vendor_id if vendor else None,
                 tran_type_id=tran_type.tran_type_id if tran_type else None,
@@ -109,7 +112,7 @@ if uploaded_files:
         if query:
             st.subheader("Stored CSV Data in Database")
             stored_data = pd.DataFrame([(row.transaction_date, row.posting_date, row.vendor_id, row.amount, row.type, row.category, row.description) for row in query],
-                                       columns=["Transaction Date", "Posting Date", "Vendors", "Amount", "Type", "Category", "Description"])
+                                       columns=["Transaction Date", "Posting Date", "Vendor", "Amount", "Type", "Category", "Description"])
             st.dataframe(stored_data)
         else:
             st.warning("No data found in the database.")

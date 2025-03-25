@@ -7,3 +7,5 @@ main.zip
 *.txt
 .venv/
 test.*
+dump/
+__pycache__/
