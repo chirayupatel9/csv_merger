@@ -9,3 +9,4 @@ main.zip
 test.*
 dump/
 __pycache__/
+*.csv
