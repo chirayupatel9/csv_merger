@@ -7,6 +7,7 @@ from sqlalchemy import func
 import plotly.express as px
 from datetime import datetime, timedelta
 import logging
+import plotly.graph_objects as go
 
 def load_transactions(start_date=None, end_date=None, search_term=None, search_column=None, selected_categories=None, amount_range=None):
     """Load transactions with search and filter capabilities"""
@@ -219,6 +220,65 @@ def update_transaction(transaction_id, updated_data):
     finally:
         session.close()
 
+def create_monthly_boxplot(transactions):
+    """Create monthly aggregation boxplot"""
+    # Ensure transaction_date is datetime
+    transactions['transaction_date'] = pd.to_datetime(transactions['transaction_date'])
+    
+    # Add month-year column
+    transactions['month_year'] = transactions['transaction_date'].dt.strftime('%Y-%m')
+    
+    # Create boxplot using plotly
+    fig = px.box(
+        transactions,
+        x='month_year',
+        y='amount',
+        title='Monthly Transaction Distribution',
+        labels={
+            'month_year': 'Month',
+            'amount': 'Transaction Amount ($)'
+        }
+    )
+    
+    # Customize the layout
+    fig.update_layout(
+        xaxis_title="Month",
+        yaxis_title="Amount ($)",
+        showlegend=False,
+        xaxis={'tickangle': 45},
+        height=500,
+        hovermode='x unified'
+    )
+    
+    # Add mean line
+    fig.add_trace(
+        go.Scatter(
+            x=transactions.groupby('month_year')['amount'].mean().index,
+            y=transactions.groupby('month_year')['amount'].mean().values,
+            mode='lines+markers',
+            name='Monthly Mean',
+            line=dict(color='red', dash='dash'),
+            marker=dict(color='red')
+        )
+    )
+    
+    return fig
+
+def display_monthly_stats(transactions):
+    """Display monthly statistics"""
+    monthly_stats = transactions.groupby('month_year').agg({
+        'amount': ['count', 'mean', 'std', 'min', 'max', 'sum']
+    }).round(2)
+    
+    monthly_stats.columns = ['Count', 'Mean', 'Std Dev', 'Min', 'Max', 'Total']
+    monthly_stats = monthly_stats.reset_index()
+    
+    # Format currency columns
+    for col in ['Mean', 'Min', 'Max', 'Total']:
+        monthly_stats[col] = monthly_stats[col].apply(lambda x: f"${x:,.2f}")
+    
+    return monthly_stats
+
 def main():
     st.title("Transaction Analysis Dashboard")
     
@@ -372,6 +432,53 @@ def main():
                 title='Monthly Spending'
             )
             st.plotly_chart(fig_monthly)
+
+        # Monthly Analysis Section
+        st.subheader("Monthly Transaction Analysis")
+        
+        # Create tabs for different views
+        tab1, tab2 = st.tabs(["Distribution Plot", "Monthly Statistics"])
+        
+        with tab1:
+            # Monthly boxplot
+            st.plotly_chart(create_monthly_boxplot(transactions))
+            
+            # Add explanatory text
+            st.markdown("""
+            **Understanding the Boxplot:**
+            - The box shows the interquartile range (IQR) containing 50% of the transactions
+            - The line inside the box is the median
+            - The whiskers extend to show the rest of the distribution
+            - Points beyond the whiskers are outliers
+            - The red dashed line shows the monthly mean
+            """)
+        
+        with tab2:
+            # Monthly statistics table
+            st.markdown("### Monthly Transaction Statistics")
+            monthly_stats = display_monthly_stats(transactions)
+            st.dataframe(
+                monthly_stats,
+                column_config={
+                    "month_year": "Month",
+                    "Count": st.column_config.NumberColumn("Count", format="%d"),
+                    "Mean": "Average Amount",
+                    "Std Dev": st.column_config.NumberColumn("Std Deviation", format="%.2f"),
+                    "Min": "Minimum Amount",
+                    "Max": "Maximum Amount",
+                    "Total": "Total Amount"
+                },
+                hide_index=True
+            )
+            
+            # Download button for statistics
+            csv = monthly_stats.to_csv(index=False)
+            st.download_button(
+                label="Download Monthly Statistics",
+                data=csv,
+                file_name="monthly_statistics.csv",
+                mime="text/csv"
+            )
 
         # Export functionality
         if st.button("Export Filtered Data"):
