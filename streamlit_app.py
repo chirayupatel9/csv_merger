@@ -8,6 +8,7 @@ import plotly.express as px
 from datetime import datetime, timedelta
 import logging
 import plotly.graph_objects as go
+import numpy as np
 
 def load_transactions(start_date=None, end_date=None, search_term=None, search_column=None, selected_categories=None, amount_range=None):
     """Load transactions with search and filter capabilities"""
@@ -279,6 +280,103 @@ def display_monthly_stats(transactions):
     
     return monthly_stats
 
+def create_sankey_diagram(transactions):
+    """Create a Sankey diagram for cash flow"""
+    # Ensure amount and category are present
+    if 'amount' not in transactions.columns or 'category' not in transactions.columns:
+        return None
+    
+    # Separate income and expenses
+    income = transactions[transactions['amount'] >= 0]
+    expenses = transactions[transactions['amount'] < 0]
+    
+    # Prepare source data (income categories)
+    income_categories = income.groupby('category')['amount'].sum()
+    
+    # Prepare target data (expense categories)
+    expense_categories = expenses.groupby('category')['amount'].sum().abs()
+    
+    # Create labels for all nodes
+    labels = ['Total Income'] + \
+            list(income_categories.index) + \
+            list(expense_categories.index)
+    
+    # Create source indices
+    sources = []
+    # From income categories to total income
+    for i in range(len(income_categories)):
+        sources.append(i + 1)  # +1 because 0 is "Total Income"
+    # From total income to expense categories
+    for i in range(len(expense_categories)):
+        sources.append(0)
+    
+    # Create target indices
+    targets = []
+    # To total income
+    for i in range(len(income_categories)):
+        targets.append(0)
+    # To expense categories
+    for i in range(len(expense_categories)):
+        targets.append(i + len(income_categories) + 1)
+    
+    # Create values
+    values = list(income_categories.values) + list(expense_categories.values)
+    
+    # Create colors
+    income_color = '#2ECC71'  # Green
+    expense_color = '#E74C3C'  # Red
+    neutral_color = '#3498DB'  # Blue
+    
+    colors = [neutral_color] + \
+            [income_color] * len(income_categories) + \
+            [expense_color] * len(expense_categories)
+    
+    # Create the figure
+    fig = go.Figure(data=[go.Sankey(
+        node=dict(
+            pad=15,
+            thickness=20,
+            line=dict(color="black", width=0.5),
+            label=labels,
+            color=colors
+        ),
+        link=dict(
+            source=sources,
+            target=targets,
+            value=values,
+            color=[income_color]*len(income_categories) + 
+                  [expense_color]*len(expense_categories)
+        )
+    )])
+    
+    # Update layout
+    fig.update_layout(
+        title="Cash Flow Sankey Diagram",
+        font_size=12,
+        height=600
+    )
+    
+    return fig
+
+def display_cash_flow_summary(transactions):
+    """Display cash flow summary statistics"""
+    income = transactions[transactions['amount'] >= 0]
+    expenses = transactions[transactions['amount'] < 0]
+    
+    summary = {
+        'Total Income': income['amount'].sum(),
+        'Total Expenses': abs(expenses['amount'].sum()),
+        'Net Cash Flow': transactions['amount'].sum(),
+        'Income Categories': len(income['category'].unique()),
+        'Expense Categories': len(expenses['category'].unique()),
+        'Top Income Category': income.groupby('category')['amount'].sum().idxmax() 
+            if not income.empty else 'N/A',
+        'Top Expense Category': expenses.groupby('category')['amount'].sum().idxmin() 
+            if not expenses.empty else 'N/A'
+    }
+    
+    return summary
+
 def main():
     st.title("Transaction Analysis Dashboard")
     
@@ -479,6 +577,99 @@ def main():
                 file_name="monthly_statistics.csv",
                 mime="text/csv"
             )
+
+        # Cash Flow Analysis Section
+        st.subheader("Cash Flow Analysis")
+        
+        # Create tabs for different views
+        tab1, tab2 = st.tabs(["Sankey Diagram", "Cash Flow Summary"])
+        
+        with tab1:
+            # Create and display Sankey diagram
+            sankey_fig = create_sankey_diagram(transactions)
+            if sankey_fig:
+                st.plotly_chart(sankey_fig, use_container_width=True)
+                
+                st.markdown("""
+                **Understanding the Sankey Diagram:**
+                - Green flows represent income
+                - Red flows represent expenses
+                - The width of each flow represents the amount
+                - Hover over flows to see exact amounts
+                - The diagram shows how money flows from income categories through total income to expense categories
+                """)
+            else:
+                st.error("Could not create Sankey diagram. Please check your data.")
+        
+        with tab2:
+            # Display cash flow summary
+            summary = display_cash_flow_summary(transactions)
+            
+            # Create three columns for metrics
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric(
+                    "Total Income",
+                    f"${summary['Total Income']:,.2f}",
+                    delta=None
+                )
+                st.metric(
+                    "Income Categories",
+                    summary['Income Categories']
+                )
+                
+            with col2:
+                st.metric(
+                    "Total Expenses",
+                    f"${summary['Total Expenses']:,.2f}",
+                    delta=None
+                )
+                st.metric(
+                    "Expense Categories",
+                    summary['Expense Categories']
+                )
+                
+            with col3:
+                st.metric(
+                    "Net Cash Flow",
+                    f"${summary['Net Cash Flow']:,.2f}",
+                    delta=summary['Net Cash Flow'],
+                    delta_color="normal"
+                )
+            
+            # Display top categories
+            st.markdown("### Top Categories")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.info(f"Top Income Category: {summary['Top Income Category']}")
+            
+            with col2:
+                st.warning(f"Top Expense Category: {summary['Top Expense Category']}")
+            
+            # Category breakdown tables
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("#### Income Breakdown")
+                income_breakdown = transactions[transactions['amount'] >= 0].groupby('category')['amount'].agg([
+                    ('Total', 'sum'),
+                    ('Count', 'count')
+                ]).sort_values('Total', ascending=False)
+                
+                income_breakdown['Total'] = income_breakdown['Total'].apply(lambda x: f"${x:,.2f}")
+                st.dataframe(income_breakdown)
+            
+            with col2:
+                st.markdown("#### Expense Breakdown")
+                expense_breakdown = transactions[transactions['amount'] < 0].groupby('category')['amount'].agg([
+                    ('Total', lambda x: abs(sum(x))),
+                    ('Count', 'count')
+                ]).sort_values('Total', ascending=False)
+                
+                expense_breakdown['Total'] = expense_breakdown['Total'].apply(lambda x: f"${x:,.2f}")
+                st.dataframe(expense_breakdown)
 
         # Export functionality
         if st.button("Export Filtered Data"):
