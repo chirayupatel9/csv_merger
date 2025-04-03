@@ -154,35 +154,63 @@ def process_csv_files(uploaded_files):
             with open(file_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
             
-            # Process file
-            df = main.csv_reader(file_path)
-            
-            # Check for duplicates within the file
-            internal_duplicates = df[df.duplicated(subset=[
-                'transaction_date',
-                'description',
-                'amount'
-            ], keep=False)]
-            
-            if not internal_duplicates.empty:
-                st.warning(f"Found internal duplicates in {uploaded_file.name}:")
-                st.dataframe(internal_duplicates)
-            
-            # Process each row
-            for _, row in df.iterrows():
-                stats['total'] += 1
-                result = store_transaction_in_db(row)
+            try:
+                # Process file using main.csv_reader
+                df = main.csv_reader(file_path)
                 
-                if result['status'] == 'success':
-                    stats['successful'] += 1
-                elif result['status'] == 'duplicate':
-                    stats['duplicates'] += 1
-                else:
+                if df.empty:
+                    st.error(f"No data found in file: {uploaded_file.name}")
                     stats['failed'] += 1
+                    continue
+                
+                # Check for required columns
+                required_columns = ['transaction_date', 'description', 'amount', 'category', 'type', 'vendorName', 'posting_date']
+                missing_columns = [col for col in required_columns if col not in df.columns]
+                if missing_columns:
+                    st.error(f"Missing required columns in {uploaded_file.name}: {', '.join(missing_columns)}")
+                    stats['failed'] += 1
+                    continue
+                
+                # Check for duplicates within the file
+                internal_duplicates = df[df.duplicated(subset=[
+                    'transaction_date',
+                    'description',
+                    'amount'
+                ], keep=False)]
+                
+                if not internal_duplicates.empty:
+                    st.warning(f"Found internal duplicates in {uploaded_file.name}:")
+                    st.dataframe(internal_duplicates)
+                
+                # Process each row
+                for _, row in df.iterrows():
+                    stats['total'] += 1
+                    result = store_transaction_in_db(row)
+                    
+                    if result['status'] == 'success':
+                        stats['successful'] += 1
+                    elif result['status'] == 'duplicate':
+                        stats['duplicates'] += 1
+                    else:
+                        stats['failed'] += 1
+                        st.error(f"Error storing transaction: {result.get('message', 'Unknown error')}")
+                
+            finally:
+                # Clean up the temporary file
+                try:
+                    os.remove(file_path)
+                except Exception as e:
+                    logging.warning(f"Failed to remove temporary file {file_path}: {e}")
                     
         except Exception as e:
             st.error(f"Error processing file {uploaded_file.name}: {str(e)}")
             stats['failed'] += 1
+            
+    # Clean up temp directory if empty
+    try:
+        os.rmdir(temp_dir)
+    except:
+        pass
             
     return stats
 
@@ -538,13 +566,31 @@ def show_vendor_details(transactions, vendor_name):
         "text/csv"
     )
 
-def main():
+def functions():
     st.title("Transaction Analysis Dashboard")
     
     # Sidebar for filters and search
     st.sidebar.title("Search & Filters")
     
+    # Add file upload to sidebar
+    uploaded_files = st.sidebar.file_uploader(
+        "Upload Transaction Files",
+        type=['csv'],
+        accept_multiple_files=True
+    )
+    
+    # Process uploaded files if any
+    if uploaded_files:
+        with st.sidebar.expander("Upload Results", expanded=True):
+            stats = process_csv_files(uploaded_files)
+            st.write("Upload Summary:")
+            st.write(f"- Total Processed: {stats['total']}")
+            st.write(f"- Successful: {stats['successful']}")
+            st.write(f"- Duplicates: {stats['duplicates']}")
+            st.write(f"- Failed: {stats['failed']}")
+    
     # Date range selector
+    st.sidebar.divider()  # Add visual separation
     date_range = st.sidebar.date_input(
         "Date Range",
         value=(datetime.now() - timedelta(days=30), datetime.now()),
@@ -1018,4 +1064,4 @@ def main():
         st.info("No transactions found for the selected criteria.")
 
 if __name__ == "__main__":
-    main() 
+    functions() 
