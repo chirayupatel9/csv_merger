@@ -377,6 +377,167 @@ def display_cash_flow_summary(transactions):
     
     return summary
 
+def create_vendor_description_analysis(transactions):
+    """Create combined analysis of vendors and descriptions"""
+    
+    # Create a detailed analysis dataframe
+    analysis_df = transactions.groupby(['vendor_name', 'description']).agg({
+        'amount': ['count', 'sum', 'mean', 'min', 'max'],
+        'category': lambda x: x.value_counts().index[0]  # most common category
+    }).round(2)
+    
+    # Flatten column names
+    analysis_df.columns = [
+        'Transaction_Count',
+        'Total_Amount',
+        'Average_Amount',
+        'Min_Amount',
+        'Max_Amount',
+        'Most_Common_Category'
+    ]
+    
+    # Reset index for better display
+    analysis_df = analysis_df.reset_index()
+    
+    # Add frequency column (percentage of total transactions)
+    total_transactions = analysis_df['Transaction_Count'].sum()
+    analysis_df['Frequency'] = (analysis_df['Transaction_Count'] / total_transactions * 100).round(2)
+    
+    return analysis_df
+
+def plot_vendor_patterns(transactions):
+    """Create visualizations for vendor patterns"""
+    # Changed 'M' to 'ME' for month end frequency
+    vendor_time_data = transactions.groupby([
+        'vendor_name', 
+        pd.Grouper(key='transaction_date', freq='ME')  # Changed from 'M' to 'ME'
+    ])['amount'].sum().reset_index()
+    
+    # Top vendors by transaction volume
+    top_vendors = transactions.groupby('vendor_name')['amount'].agg(['count', 'sum'])\
+        .sort_values('count', ascending=False).head(10)
+    
+    # Create figures
+    fig_time = px.line(
+        vendor_time_data,
+        x='transaction_date',
+        y='amount',
+        color='vendor_name',
+        title='Vendor Transaction Patterns Over Time'
+    )
+    
+    fig_volume = px.bar(
+        top_vendors,
+        y=top_vendors.index,
+        x='count',
+        orientation='h',
+        title='Top 10 Vendors by Transaction Volume'
+    )
+    
+    return fig_time, fig_volume
+
+def show_vendor_details(transactions, vendor_name):
+    """Show detailed analysis for a specific vendor"""
+    vendor_transactions = transactions[transactions['vendor_name'] == vendor_name].copy()
+    
+    st.subheader(f"Detailed Analysis for {vendor_name}")
+    
+    # Summary metrics
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric(
+            "Total Transactions",
+            len(vendor_transactions)
+        )
+    with col2:
+        st.metric(
+            "Total Amount",
+            f"${vendor_transactions['amount'].sum():,.2f}"
+        )
+    with col3:
+        st.metric(
+            "Average Amount",
+            f"${vendor_transactions['amount'].mean():,.2f}"
+        )
+    with col4:
+        st.metric(
+            "Most Common Category",
+            vendor_transactions['category'].mode().iloc[0]
+        )
+
+    # Transaction timeline
+    fig_timeline = px.line(
+        vendor_transactions,
+        x='transaction_date',
+        y='amount',
+        title=f'Transaction Timeline for {vendor_name}'
+    )
+    st.plotly_chart(fig_timeline)
+
+    # Monthly pattern
+    monthly_data = vendor_transactions.groupby(
+        pd.Grouper(key='transaction_date', freq='ME')
+    )['amount'].agg(['count', 'sum', 'mean']).reset_index()
+    
+    monthly_data.columns = ['Month', 'Count', 'Total', 'Average']
+    
+    # Monthly patterns visualization
+    fig_monthly = px.bar(
+        monthly_data,
+        x='Month',
+        y=['Total', 'Average'],
+        title=f'Monthly Patterns for {vendor_name}',
+        barmode='group'
+    )
+    st.plotly_chart(fig_monthly)
+
+    # Detailed transactions table
+    st.subheader("All Transactions")
+    
+    # Add date range filter for transactions
+    date_range = st.date_input(
+        "Filter by Date Range",
+        value=(
+            vendor_transactions['transaction_date'].min(),
+            vendor_transactions['transaction_date'].max()
+        )
+    )
+    
+    filtered_transactions = vendor_transactions[
+        (vendor_transactions['transaction_date'].dt.date >= date_range[0]) &
+        (vendor_transactions['transaction_date'].dt.date <= date_range[1])
+    ]
+    
+    # Sort transactions by date
+    filtered_transactions = filtered_transactions.sort_values('transaction_date', ascending=False)
+    
+    # Display transactions with formatted columns
+    st.dataframe(
+        filtered_transactions,
+        column_config={
+            "transaction_date": st.column_config.DatetimeColumn(
+                "Date",
+                format="YYYY-MM-DD"
+            ),
+            "amount": st.column_config.NumberColumn(
+                "Amount",
+                format="$%.2f"
+            ),
+            "description": "Description",
+            "category": "Category"
+        },
+        hide_index=True
+    )
+
+    # Add download button for vendor transactions
+    csv = filtered_transactions.to_csv(index=False)
+    st.download_button(
+        "Download Vendor Transactions",
+        csv,
+        f"{vendor_name}_transactions.csv",
+        "text/csv"
+    )
+
 def main():
     st.title("Transaction Analysis Dashboard")
     
@@ -670,6 +831,179 @@ def main():
                 
                 expense_breakdown['Total'] = expense_breakdown['Total'].apply(lambda x: f"${x:,.2f}")
                 st.dataframe(expense_breakdown)
+
+        # Vendor and Description Analysis Section
+        st.subheader("Vendor and Description Analysis")
+        
+        tabs = st.tabs(["Combined Analysis", "Visualizations", "Pattern Search", "Vendor Details"])
+        
+        with tabs[0]:
+            st.markdown("### Vendor-Description Patterns")
+            
+            # Get combined analysis
+            analysis_df = create_vendor_description_analysis(transactions)
+            
+            # Add filters
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                min_transactions = st.number_input(
+                    "Minimum Transactions",
+                    min_value=1,
+                    value=2,
+                    step=1
+                )
+            with col2:
+                min_amount = st.number_input(
+                    "Minimum Total Amount",
+                    min_value=0.0,
+                    value=100.0,
+                    step=50.0
+                )
+            with col3:
+                vendor_search = st.text_input(
+                    "Search Vendor/Description",
+                    ""
+                )
+            
+            # Filter the dataframe
+            filtered_df = analysis_df[
+                (analysis_df['Transaction_Count'] >= min_transactions) &
+                (analysis_df['Total_Amount'] >= min_amount)
+            ]
+            
+            if vendor_search:
+                filtered_df = filtered_df[
+                    filtered_df['vendor_name'].str.contains(vendor_search, case=False) |
+                    filtered_df['description'].str.contains(vendor_search, case=False)
+                ]
+            
+            # Display the filtered dataframe
+            st.dataframe(
+                filtered_df,
+                column_config={
+                    "vendor_name": "Vendor",
+                    "description": "Description",
+                    "Transaction_Count": st.column_config.NumberColumn("Count", format="%d"),
+                    "Total_Amount": st.column_config.NumberColumn("Total ($)", format="$%.2f"),
+                    "Average_Amount": st.column_config.NumberColumn("Average ($)", format="$%.2f"),
+                    "Min_Amount": st.column_config.NumberColumn("Min ($)", format="$%.2f"),
+                    "Max_Amount": st.column_config.NumberColumn("Max ($)", format="$%.2f"),
+                    "Frequency": st.column_config.NumberColumn("Frequency (%)", format="%.2f%%"),
+                    "Most_Common_Category": "Category"
+                },
+                hide_index=True
+            )
+            
+            # Add download button
+            csv = filtered_df.to_csv(index=False)
+            st.download_button(
+                "Download Analysis",
+                csv,
+                "vendor_description_analysis.csv",
+                "text/csv"
+            )
+        
+        with tabs[1]:
+            st.markdown("### Transaction Patterns")
+            
+            # Create and display visualizations
+            fig_time, fig_volume = plot_vendor_patterns(transactions)
+            
+            st.plotly_chart(fig_time, use_container_width=True)
+            st.plotly_chart(fig_volume, use_container_width=True)
+            
+            # Add summary statistics
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("#### Top Recurring Transactions")
+                recurring = analysis_df.sort_values('Frequency', ascending=False).head(5)
+                st.dataframe(
+                    recurring[['vendor_name', 'description', 'Frequency', 'Average_Amount']],
+                    hide_index=True
+                )
+            
+            with col2:
+                st.markdown("#### Largest Transactions")
+                largest = analysis_df.sort_values('Max_Amount', ascending=False).head(5)
+                st.dataframe(
+                    largest[['vendor_name', 'description', 'Max_Amount', 'Transaction_Count']],
+                    hide_index=True
+                )
+        
+        with tabs[2]:
+            st.markdown("### Pattern Search")
+            
+            # Add pattern search functionality
+            pattern_search = st.text_input(
+                "Search for transaction patterns",
+                placeholder="Enter keywords to search in descriptions..."
+            )
+            
+            if pattern_search:
+                pattern_results = transactions[
+                    transactions['description'].str.contains(pattern_search, case=False) |
+                    transactions['vendor_name'].str.contains(pattern_search, case=False)
+                ]
+                
+                if not pattern_results.empty:
+                    st.markdown(f"Found {len(pattern_results)} matching transactions")
+                    
+                    # Group by month to show patterns
+                    monthly_patterns = pattern_results.groupby(
+                        pattern_results['transaction_date'].dt.strftime('%Y-%m')
+                    ).agg({
+                        'amount': ['count', 'sum', 'mean'],
+                        'description': 'first'
+                    })
+                    
+                    monthly_patterns.columns = ['Count', 'Total', 'Average', 'Sample Description']
+                    st.dataframe(monthly_patterns)
+                    
+                    # Plot pattern over time
+                    fig_pattern = px.line(
+                        pattern_results,
+                        x='transaction_date',
+                        y='amount',
+                        title=f'Transaction Pattern: {pattern_search}'
+                    )
+                    st.plotly_chart(fig_pattern)
+                else:
+                    st.info("No matching patterns found")
+
+        with tabs[3]:
+            st.subheader("Vendor Analysis")
+            
+            # Create two columns
+            col1, col2 = st.columns([1, 2])
+            
+            with col1:
+                # Vendor selection
+                vendors = sorted(transactions['vendor_name'].unique())
+                selected_vendor = st.selectbox(
+                    "Select Vendor",
+                    vendors,
+                    key="vendor_selector"
+                )
+                
+                # Show vendor summary
+                vendor_summary = transactions[
+                    transactions['vendor_name'] == selected_vendor
+                ].agg({
+                    'amount': ['count', 'sum', 'mean'],
+                    'category': lambda x: x.mode().iloc[0]
+                })
+                
+                st.markdown("### Quick Summary")
+                st.write(f"Total Transactions: {vendor_summary['amount']['count']:,}")
+                st.write(f"Total Amount: ${vendor_summary['amount']['sum']:,.2f}")
+                st.write(f"Average Amount: ${vendor_summary['amount']['mean']:,.2f}")
+                st.write(f"Main Category: {vendor_summary['category']}")
+            
+            with col2:
+                # Show vendor details in main area
+                if selected_vendor:
+                    show_vendor_details(transactions, selected_vendor)
 
         # Export functionality
         if st.button("Export Filtered Data"):
