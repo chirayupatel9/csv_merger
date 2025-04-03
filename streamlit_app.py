@@ -155,7 +155,7 @@ def process_csv_files(uploaded_files):
                 f.write(uploaded_file.getbuffer())
             
             # Process file
-            df = csv_reader(file_path)
+            df = main.csv_reader(file_path)
             
             # Check for duplicates within the file
             internal_duplicates = df[df.duplicated(subset=[
