@@ -1,8 +1,14 @@
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, Numeric, Text, Date
 from sqlalchemy.orm import relationship, declarative_base, sessionmaker
 from datetime import datetime
+import os       
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
 # Database Configuration
-DATABASE_URL = "postgresql://postgres:Password#123@localhost:5432/expense_db"
+DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/your_database_name')
 
 # Create SQLAlchemy Engine
 try:

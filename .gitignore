@@ -10,3 +10,4 @@ test.*
 dump/
 __pycache__/
 *.csv
+.env

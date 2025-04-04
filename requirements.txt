@@ -1,3 +1,6 @@
+streamlit
 pandas
+sqlalchemy
+plotly
+psycopg2-binary
 numpy
-pyinstaller
