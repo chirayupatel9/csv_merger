@@ -702,183 +702,7 @@ def functions():
         col1.metric("Filtered Transactions", len(transactions))
         col2.metric("Total Amount", f"${transactions['amount'].sum():,.2f}")
         col3.metric("Average Amount", f"${transactions['amount'].mean():,.2f}")
-
-        # Visualizations
-        st.subheader("Transaction Analysis")
-        
-        # Time series plot
-        fig_timeline = px.line(
-            transactions,
-            x='transaction_date',
-            y='amount',
-            title='Transaction Timeline'
-        )
-        st.plotly_chart(fig_timeline)
-
-        # Category breakdown
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            category_data = transactions.groupby('category')['amount'].sum()
-            fig_category = px.pie(
-                values=category_data.values,
-                names=category_data.index,
-                title='Spending by Category'
-            )
-            st.plotly_chart(fig_category)
-        
-        with col2:
-            monthly_data = transactions.groupby(
-                transactions['transaction_date'].dt.strftime('%Y-%m')
-            )['amount'].sum()
-            fig_monthly = px.bar(
-                x=monthly_data.index,
-                y=monthly_data.values,
-                title='Monthly Spending'
-            )
-            st.plotly_chart(fig_monthly)
-
-        # Monthly Analysis Section
-        st.subheader("Monthly Transaction Analysis")
-        
-        # Create tabs for different views
-        tab1, tab2 = st.tabs(["Distribution Plot", "Monthly Statistics"])
-        
-        with tab1:
-            # Monthly boxplot
-            st.plotly_chart(create_monthly_boxplot(transactions))
-            
-            # Add explanatory text
-            st.markdown("""
-            **Understanding the Boxplot:**
-            - The box shows the interquartile range (IQR) containing 50% of the transactions
-            - The line inside the box is the median
-            - The whiskers extend to show the rest of the distribution
-            - Points beyond the whiskers are outliers
-            - The red dashed line shows the monthly mean
-            """)
-        
-        with tab2:
-            # Monthly statistics table
-            st.markdown("### Monthly Transaction Statistics")
-            monthly_stats = display_monthly_stats(transactions)
-            st.dataframe(
-                monthly_stats,
-                column_config={
-                    "month_year": "Month",
-                    "Count": st.column_config.NumberColumn("Count", format="%d"),
-                    "Mean": "Average Amount",
-                    "Std Dev": st.column_config.NumberColumn("Std Deviation", format="%.2f"),
-                    "Min": "Minimum Amount",
-                    "Max": "Maximum Amount",
-                    "Total": "Total Amount"
-                },
-                hide_index=True
-            )
-            
-            # Download button for statistics
-            csv = monthly_stats.to_csv(index=False)
-            st.download_button(
-                label="Download Monthly Statistics",
-                data=csv,
-                file_name="monthly_statistics.csv",
-                mime="text/csv"
-            )
-
-        # Cash Flow Analysis Section
-        st.subheader("Cash Flow Analysis")
-        
-        # Create tabs for different views
-        tab1, tab2 = st.tabs(["Sankey Diagram", "Cash Flow Summary"])
-        
-        with tab1:
-            # Create and display Sankey diagram
-            sankey_fig = create_sankey_diagram(transactions)
-            if sankey_fig:
-                st.plotly_chart(sankey_fig, use_container_width=True)
-                
-                st.markdown("""
-                **Understanding the Sankey Diagram:**
-                - Green flows represent income
-                - Red flows represent expenses
-                - The width of each flow represents the amount
-                - Hover over flows to see exact amounts
-                - The diagram shows how money flows from income categories through total income to expense categories
-                """)
-            else:
-                st.error("Could not create Sankey diagram. Please check your data.")
-        
-        with tab2:
-            # Display cash flow summary
-            summary = display_cash_flow_summary(transactions)
-            
-            # Create three columns for metrics
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.metric(
-                    "Total Income",
-                    f"${summary['Total Income']:,.2f}",
-                    delta=None
-                )
-                st.metric(
-                    "Income Categories",
-                    summary['Income Categories']
-                )
-                
-            with col2:
-                st.metric(
-                    "Total Expenses",
-                    f"${summary['Total Expenses']:,.2f}",
-                    delta=None
-                )
-                st.metric(
-                    "Expense Categories",
-                    summary['Expense Categories']
-                )
-                
-            with col3:
-                st.metric(
-                    "Net Cash Flow",
-                    f"${summary['Net Cash Flow']:,.2f}",
-                    delta=summary['Net Cash Flow'],
-                    delta_color="normal"
-                )
-            
-            # Display top categories
-            st.markdown("### Top Categories")
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.info(f"Top Income Category: {summary['Top Income Category']}")
-            
-            with col2:
-                st.warning(f"Top Expense Category: {summary['Top Expense Category']}")
-            
-            # Category breakdown tables
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("#### Income Breakdown")
-                income_breakdown = transactions[transactions['amount'] >= 0].groupby('category')['amount'].agg([
-                    ('Total', 'sum'),
-                    ('Count', 'count')
-                ]).sort_values('Total', ascending=False)
-                
-                income_breakdown['Total'] = income_breakdown['Total'].apply(lambda x: f"${x:,.2f}")
-                st.dataframe(income_breakdown)
-            
-            with col2:
-                st.markdown("#### Expense Breakdown")
-                expense_breakdown = transactions[transactions['amount'] < 0].groupby('category')['amount'].agg([
-                    ('Total', lambda x: abs(sum(x))),
-                    ('Count', 'count')
-                ]).sort_values('Total', ascending=False)
-                
-                expense_breakdown['Total'] = expense_breakdown['Total'].apply(lambda x: f"${x:,.2f}")
-                st.dataframe(expense_breakdown)
-
-        # Vendor and Description Analysis Section
+# Vendor and Description Analysis Section
         st.subheader("Vendor and Description Analysis")
         
         tabs = st.tabs(["Combined Analysis", "Visualizations", "Pattern Search", "Vendor Details"])
@@ -1060,6 +884,182 @@ def functions():
                 file_name="transactions_export.csv",
                 mime="text/csv"
             )
+        # Visualizations
+        st.subheader("Transaction Analysis")
+        
+        # Time series plot
+        fig_timeline = px.line(
+            transactions,
+            x='transaction_date',
+            y='amount',
+            title='Transaction Timeline'
+        )
+        st.plotly_chart(fig_timeline)
+
+        # Category breakdown
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            category_data = transactions.groupby('category')['amount'].sum()
+            fig_category = px.pie(
+                values=category_data.values,
+                names=category_data.index,
+                title='Spending by Category'
+            )
+            st.plotly_chart(fig_category)
+        
+        with col2:
+            monthly_data = transactions.groupby(
+                transactions['transaction_date'].dt.strftime('%Y-%m')
+            )['amount'].sum()
+            fig_monthly = px.bar(
+                x=monthly_data.index,
+                y=monthly_data.values,
+                title='Monthly Spending'
+            )
+            st.plotly_chart(fig_monthly)
+
+        # Monthly Analysis Section
+        st.subheader("Monthly Transaction Analysis")
+        
+        # Create tabs for different views
+        tab1, tab2 = st.tabs(["Distribution Plot", "Monthly Statistics"])
+        
+        with tab1:
+            # Monthly boxplot
+            st.plotly_chart(create_monthly_boxplot(transactions))
+            
+            # Add explanatory text
+            st.markdown("""
+            **Understanding the Boxplot:**
+            - The box shows the interquartile range (IQR) containing 50% of the transactions
+            - The line inside the box is the median
+            - The whiskers extend to show the rest of the distribution
+            - Points beyond the whiskers are outliers
+            - The red dashed line shows the monthly mean
+            """)
+        
+        with tab2:
+            # Monthly statistics table
+            st.markdown("### Monthly Transaction Statistics")
+            monthly_stats = display_monthly_stats(transactions)
+            st.dataframe(
+                monthly_stats,
+                column_config={
+                    "month_year": "Month",
+                    "Count": st.column_config.NumberColumn("Count", format="%d"),
+                    "Mean": "Average Amount",
+                    "Std Dev": st.column_config.NumberColumn("Std Deviation", format="%.2f"),
+                    "Min": "Minimum Amount",
+                    "Max": "Maximum Amount",
+                    "Total": "Total Amount"
+                },
+                hide_index=True
+            )
+            
+            # Download button for statistics
+            csv = monthly_stats.to_csv(index=False)
+            st.download_button(
+                label="Download Monthly Statistics",
+                data=csv,
+                file_name="monthly_statistics.csv",
+                mime="text/csv"
+            )
+
+        # Cash Flow Analysis Section
+        st.subheader("Cash Flow Analysis")
+        
+        # Create tabs for different views
+        tab1, tab2 = st.tabs(["Sankey Diagram", "Cash Flow Summary"])
+        
+        with tab1:
+            # Create and display Sankey diagram
+            sankey_fig = create_sankey_diagram(transactions)
+            if sankey_fig:
+                st.plotly_chart(sankey_fig, use_container_width=True)
+                
+                st.markdown("""
+                **Understanding the Sankey Diagram:**
+                - Green flows represent income
+                - Red flows represent expenses
+                - The width of each flow represents the amount
+                - Hover over flows to see exact amounts
+                - The diagram shows how money flows from income categories through total income to expense categories
+                """)
+            else:
+                st.error("Could not create Sankey diagram. Please check your data.")
+        
+        with tab2:
+            # Display cash flow summary
+            summary = display_cash_flow_summary(transactions)
+            
+            # Create three columns for metrics
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric(
+                    "Total Income",
+                    f"${summary['Total Income']:,.2f}",
+                    delta=None
+                )
+                st.metric(
+                    "Income Categories",
+                    summary['Income Categories']
+                )
+                
+            with col2:
+                st.metric(
+                    "Total Expenses",
+                    f"${summary['Total Expenses']:,.2f}",
+                    delta=None
+                )
+                st.metric(
+                    "Expense Categories",
+                    summary['Expense Categories']
+                )
+                
+            with col3:
+                st.metric(
+                    "Net Cash Flow",
+                    f"${summary['Net Cash Flow']:,.2f}",
+                    delta=summary['Net Cash Flow'],
+                    delta_color="normal"
+                )
+            
+            # Display top categories
+            st.markdown("### Top Categories")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.info(f"Top Income Category: {summary['Top Income Category']}")
+            
+            with col2:
+                st.warning(f"Top Expense Category: {summary['Top Expense Category']}")
+            
+            # Category breakdown tables
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("#### Income Breakdown")
+                income_breakdown = transactions[transactions['amount'] >= 0].groupby('category')['amount'].agg([
+                    ('Total', 'sum'),
+                    ('Count', 'count')
+                ]).sort_values('Total', ascending=False)
+                
+                income_breakdown['Total'] = income_breakdown['Total'].apply(lambda x: f"${x:,.2f}")
+                st.dataframe(income_breakdown)
+            
+            with col2:
+                st.markdown("#### Expense Breakdown")
+                expense_breakdown = transactions[transactions['amount'] < 0].groupby('category')['amount'].agg([
+                    ('Total', lambda x: abs(sum(x))),
+                    ('Count', 'count')
+                ]).sort_values('Total', ascending=False)
+                
+                expense_breakdown['Total'] = expense_breakdown['Total'].apply(lambda x: f"${x:,.2f}")
+                st.dataframe(expense_breakdown)
+
+        
     else:
         st.info("No transactions found for the selected criteria.")
 
