@@ -27,7 +27,7 @@ class Users(Base):
     user_id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(50))
     username = Column(String(50))
-    password = Column(String(50))
+    password = Column(String(100))
     created_at = Column(DateTime)
     updated_at = Column(DateTime)
     tries = Column(Integer, default=1)

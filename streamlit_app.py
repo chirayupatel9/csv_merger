@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from dbmodels import SessionLocal, AccountTransaction, Vendor
+from dbmodels import SessionLocal, AccountTransaction, Vendor, Users
 import main
 import os
 from sqlalchemy import func
@@ -9,6 +9,9 @@ from datetime import datetime, timedelta
 import logging
 import plotly.graph_objects as go
 import numpy as np
+import hashlib
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy import text
 
 def load_transactions(start_date=None, end_date=None, search_term=None, search_column=None, selected_categories=None, amount_range=None):
     """Load transactions with search and filter capabilities"""
@@ -566,8 +569,197 @@ def show_vendor_details(transactions, vendor_name):
         "text/csv"
     )
 
+def hash_password(password):
+    """Create a SHA-256 hash of the password"""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def authenticate_user(username, password):
+    """Authenticate user and update login information"""
+    session = SessionLocal()
+    try:
+        hashed_password = hash_password(password)
+        user = session.query(Users).filter_by(username=username).first()
+        
+        if user and user.password == hashed_password:
+            # Update login information
+            user.last_login = datetime.utcnow()
+            user.tries = 1  # Reset login attempts
+            session.commit()
+            
+            # Extract user data before closing session
+            user_data = {
+                "user_id": user.user_id,
+                "username": user.username,
+                "name": user.name,
+                "email": user.email
+            }
+            return user_data
+        elif user:
+            # Increment login attempts
+            user.tries += 1
+            session.commit()
+        return None
+    except Exception as e:
+        st.error(f"Authentication error: {e}")
+        return None
+    finally:
+        session.close()
+
+def register_new_user(name, username, password, email):
+    """Register a new user"""
+    session = SessionLocal()
+    try:
+        # Check if username already exists
+        existing_user = session.query(Users).filter_by(username=username).first()
+        if existing_user:
+            return False, "Username already exists"
+            
+        # Check if email already exists
+        existing_email = session.query(Users).filter_by(email=email).first()
+        if existing_email:
+            return False, "Email already in use"
+            
+        # Create new user
+        hashed_password = hash_password(password)
+        new_user = Users(
+            name=name,
+            username=username,
+            password=hashed_password,
+            email=email,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+            tries=1,
+            last_login=datetime.utcnow()
+        )
+        session.add(new_user)
+        session.commit()
+        return True, "Registration successful"
+    except IntegrityError:
+        session.rollback()
+        return False, "Database error: User could not be created"
+    except Exception as e:
+        session.rollback()
+        return False, f"Error creating user: {e}"
+    finally:
+        session.close()
+
+def login_page():
+    """Display login page"""
+    st.title("Transaction Dashboard - Login")
+    
+    # Check if already logged in
+    if st.session_state.get("user_id"):
+        st.success("You are already logged in!")
+        st.button("Continue to Dashboard", on_click=lambda: st.session_state.update({"page": "dashboard"}))
+        st.button("Logout", on_click=logout)
+        return
+    
+    # Create tabs for login and registration
+    tab1, tab2 = st.tabs(["Login", "Register"])
+    
+    with tab1:
+        st.subheader("Login to Your Account")
+        username = st.text_input("Username", key="login_username")
+        password = st.text_input("Password", type="password", key="login_password")
+        
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            login_button = st.button("Login")
+        
+        if login_button:
+            if not username or not password:
+                st.error("Please enter both username and password")
+            else:
+                user_data = authenticate_user(username, password)
+                if user_data:
+                    # Store user data in session state
+                    st.session_state["user_id"] = user_data["user_id"]
+                    st.session_state["username"] = user_data["username"]
+                    st.session_state["name"] = user_data["name"]
+                    st.session_state["page"] = "dashboard"
+                    st.success("Login successful!")
+                    st.rerun()
+                else:
+                    st.error("Invalid username or password")
+    
+    with tab2:
+        st.subheader("Create New Account")
+        
+        name = st.text_input("Full Name", key="reg_name")
+        username = st.text_input("Username", key="reg_username")
+        email = st.text_input("Email Address", key="reg_email")
+        password = st.text_input("Password", type="password", key="reg_password")
+        confirm_password = st.text_input("Confirm Password", type="password", key="reg_confirm")
+        
+        register_button = st.button("Register")
+        
+        if register_button:
+            if not all([name, username, email, password, confirm_password]):
+                st.error("Please fill in all fields")
+            elif password != confirm_password:
+                st.error("Passwords do not match")
+            elif len(password) < 6:
+                st.error("Password must be at least 6 characters long")
+            else:
+                success, message = register_new_user(name, username, password, email)
+                if success:
+                    st.success(message)
+                    st.info("Please login with your new account")
+                    # Switch to login tab
+                    st.session_state["active_tab"] = "Login"
+                else:
+                    st.error(message)
+
+def logout():
+    """Log out the current user"""
+    for key in ["user_id", "username", "name"]:
+        if key in st.session_state:
+            del st.session_state[key]
+    
+    st.session_state["page"] = "login"
+    st.rerun()
+
+def update_password_field_length():
+    """Update the password field length in the database"""
+    engine = SessionLocal().get_bind()
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("ALTER TABLE users ALTER COLUMN password TYPE varchar(100)"))
+            conn.commit()
+            return True
+        except Exception as e:
+            logging.error(f"Error updating password field length: {e}")
+            return False
+
+def initialize_session_state():
+    """Initialize session state variables"""
+    if "page" not in st.session_state:
+        st.session_state["page"] = "login"
+    
+    # Try to update password field length
+    if "db_schema_updated" not in st.session_state:
+        update_success = update_password_field_length()
+        st.session_state["db_schema_updated"] = update_success
+        if not update_success:
+            st.warning("Warning: Could not update database schema. Registration might not work correctly.")
+
 def functions():
+    # Initialize session state
+    initialize_session_state()
+    
+    # Display appropriate page based on session state
+    if st.session_state["page"] == "login":
+        login_page()
+    else:
+        dashboard_page()
+
+def dashboard_page():
+    """Main dashboard functionality"""
     st.title("Transaction Analysis Dashboard")
+    
+    # Display user information and logout button in the sidebar
+    st.sidebar.markdown(f"### Welcome, {st.session_state.get('name', 'User')}")
+    st.sidebar.button("Logout", on_click=logout)
     
     # Sidebar for filters and search
     st.sidebar.title("Search & Filters")
@@ -702,7 +894,8 @@ def functions():
         col1.metric("Filtered Transactions", len(transactions))
         col2.metric("Total Amount", f"${transactions['amount'].sum():,.2f}")
         col3.metric("Average Amount", f"${transactions['amount'].mean():,.2f}")
-# Vendor and Description Analysis Section
+
+        # Vendor and Description Analysis Section
         st.subheader("Vendor and Description Analysis")
         
         tabs = st.tabs(["Combined Analysis", "Visualizations", "Pattern Search", "Vendor Details"])
