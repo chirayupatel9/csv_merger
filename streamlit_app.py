@@ -256,26 +256,26 @@ def update_transaction(transaction_id, updated_data):
             return False
             
         # Update the transaction
-            for key, value in updated_data.items():
-                if key in ['transaction_date', 'posting_date']:
-                    value = pd.to_datetime(value)
-                if key == 'vendor_name':
-                    # Handle vendor update
-                    vendor = session.query(Vendor).filter_by(vendor_name=value).first()
-                    if not vendor:
-                        vendor = Vendor(
-                            vendor_name=value,
-                            vendor_code=value[:10],
-                        created_by=st.session_state["user_id"],
-                        updated_by=st.session_state["user_id"]
-                        )
-                        session.add(vendor)
-                        session.flush()
-                    transaction.vendor_id = vendor.vendor_id
-                else:
-                    setattr(transaction, key, value)
-            
-            transaction.updated_at = datetime.utcnow()
+        for key, value in updated_data.items():
+            if key in ['transaction_date', 'posting_date']:
+                value = pd.to_datetime(value)
+            if key == 'vendor_name':
+                # Handle vendor update
+                vendor = session.query(Vendor).filter_by(vendor_name=value).first()
+                if not vendor:
+                    vendor = Vendor(
+                        vendor_name=value,
+                        vendor_code=value[:10],
+                    created_by=st.session_state["user_id"],
+                    updated_by=st.session_state["user_id"]
+                    )
+                    session.add(vendor)
+                    session.flush()
+                transaction.vendor_id = vendor.vendor_id
+            else:
+                setattr(transaction, key, value)
+        
+        transaction.updated_at = datetime.utcnow()
         transaction.updated_by = st.session_state["user_id"]  # Update the updater
         session.commit()
         return True
@@ -787,6 +787,67 @@ def functions():
     else:
         dashboard_page()
 
+def generate_financial_insights(transactions):
+    """Generate personalized financial insights based on transaction data"""
+    insights = []
+    
+    if transactions.empty:
+        return ["No transaction data available to generate insights."]
+    
+    # Calculate basic metrics
+    income = transactions[transactions['amount'] >= 0]
+    expenses = transactions[transactions['amount'] < 0]
+    total_income = income['amount'].sum()
+    total_expenses = abs(expenses['amount'].sum())
+    net_cash_flow = total_income - total_expenses
+    
+    # Check overall cash flow
+    if net_cash_flow < 0:
+        insights.append("⚠️ Your expenses exceed your income. Consider reviewing your budget to reduce spending.")
+    else:
+        savings_rate = (net_cash_flow / total_income) * 100 if total_income > 0 else 0
+        if savings_rate < 10:
+            insights.append("💡 Your current savings rate is below 10%. Financial experts recommend saving at least 20% of your income.")
+        elif savings_rate < 20:
+            insights.append("👍 You're saving, but consider increasing your savings rate to at least 20% for better financial security.")
+        else:
+            insights.append("🌟 Great job maintaining a healthy savings rate above 20%!")
+    
+    # Analyze expense categories
+    if not expenses.empty:
+        expense_by_category = expenses.groupby('category')['amount'].sum().abs()
+        top_expense = expense_by_category.idxmax()
+        top_expense_pct = (expense_by_category.max() / total_expenses) * 100
+        
+        if top_expense_pct > 30:
+            insights.append(f"📊 Your highest expense category is '{top_expense}' at {top_expense_pct:.1f}% of total spending. Consider if this aligns with your priorities.")
+        
+        # Check for unusual spending patterns
+        recent_expenses = expenses[expenses['transaction_date'] >= (datetime.now() - timedelta(days=30))]
+        if not recent_expenses.empty:
+            recent_total = abs(recent_expenses['amount'].sum())
+            monthly_avg = total_expenses / (max(1, (transactions['transaction_date'].max() - transactions['transaction_date'].min()).days / 30))
+            
+            if recent_total > monthly_avg * 1.2:
+                insights.append(f"📈 Your spending in the last 30 days is {((recent_total/monthly_avg)-1)*100:.1f}% higher than your monthly average. Review recent transactions.")
+            elif recent_total < monthly_avg * 0.8:
+                insights.append(f"📉 Your spending in the last 30 days is {((monthly_avg/recent_total)-1)*100:.1f}% lower than your monthly average. Good job controlling expenses!")
+    
+    # Recommendations for saving more
+    recommendations = [
+        "🔍 Review subscription services monthly to eliminate unused ones.",
+        "📱 Consider negotiating bills for services like internet, phone, and insurance.",
+        "🍽️ Plan meals ahead to reduce food expenses and minimize waste.",
+        "💰 Set up automatic transfers to savings on payday.",
+        "🛒 Use shopping lists and avoid impulse purchases."
+    ]
+    
+    # Choose 2-3 random recommendations
+    import random
+    selected_recommendations = random.sample(recommendations, min(3, len(recommendations)))
+    
+    return insights + ["Recommendations to save more:"] + selected_recommendations
+
 def dashboard_page():
     """Main dashboard functionality"""
     # Check if user is logged in
@@ -796,6 +857,15 @@ def dashboard_page():
         st.rerun()
         return
         
+    # Get current time for greeting
+    current_hour = datetime.now().hour
+    if current_hour < 12:
+        greeting = "Good morning"
+    elif current_hour < 18:
+        greeting = "Good afternoon"
+    else:
+        greeting = "Good evening"
+    
     st.title("Transaction Analysis Dashboard")
     
     # Display user information and logout button in the sidebar
@@ -862,6 +932,83 @@ def dashboard_page():
         amount_range=amount_range
     )
     
+    # Add personalized greeting and financial insights at the top
+    st.markdown(f"## {greeting}, {st.session_state.get('name', 'User')}! 👋")
+    
+    # Add personalized insights card
+    with st.container():
+        st.markdown("### Your Financial Insights")
+        
+        # Load all transactions for the current user for better insights
+        all_user_transactions = load_transactions()
+        
+        insights = generate_financial_insights(all_user_transactions)
+        
+        # Format insights in a nice card
+        with st.expander("View your personalized financial insights", expanded=True):
+            for insight in insights:
+                st.markdown(f"* {insight}")
+                
+            # Add a quick metrics summary
+            if not all_user_transactions.empty:
+                st.divider()
+                col1, col2, col3 = st.columns(3)
+                
+                # Calculate metrics
+                income = all_user_transactions[all_user_transactions['amount'] >= 0]
+                expenses = all_user_transactions[all_user_transactions['amount'] < 0]
+                total_income = income['amount'].sum()
+                total_expenses = abs(expenses['amount'].sum())
+                net_cash_flow = total_income - total_expenses
+                savings_rate = (net_cash_flow / total_income) * 100 if total_income > 0 else 0
+                
+                with col1:
+                    st.metric("Monthly Income", f"${total_income/max(1, len(all_user_transactions['transaction_date'].dt.strftime('%Y-%m').unique())):.2f}")
+                
+                with col2:
+                    st.metric("Monthly Expenses", f"${total_expenses/max(1, len(all_user_transactions['transaction_date'].dt.strftime('%Y-%m').unique())):.2f}")
+                
+                with col3:
+                    st.metric("Savings Rate", f"{savings_rate:.1f}%")
+    
+    # Add a visual summary of spending habits
+    if not transactions.empty:
+        st.markdown("### Your Spending Habits At A Glance")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Create a weekly spending pattern
+            transactions['day_of_week'] = transactions['transaction_date'].dt.day_name()
+            weekday_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+            day_spending = transactions[transactions['amount'] < 0].groupby('day_of_week')['amount'].sum().abs()
+            day_spending = day_spending.reindex(weekday_order, fill_value=0)
+            
+            fig_weekly = px.bar(
+                x=day_spending.index,
+                y=day_spending.values,
+                labels={'x': 'Day of Week', 'y': 'Spending Amount ($)'},
+                title='When You Spend: Weekly Pattern',
+                color=day_spending.values,
+                color_continuous_scale=px.colors.sequential.Blues
+            )
+            st.plotly_chart(fig_weekly, use_container_width=True)
+        
+        with col2:
+            # Create a spending by category summary
+            expenses = transactions[transactions['amount'] < 0]
+            category_spending = expenses.groupby('category')['amount'].sum().abs().sort_values(ascending=False).head(5)
+            
+            fig_category = px.pie(
+                values=category_spending.values,
+                names=category_spending.index,
+                title='Where Your Money Goes: Top 5 Categories',
+                hole=0.4,
+                color_discrete_sequence=px.colors.qualitative.Set3
+            )
+            fig_category.update_traces(textposition='inside', textinfo='percent+label')
+            st.plotly_chart(fig_category, use_container_width=True)
+    
+    # Continue with the rest of the dashboard content...
     if not transactions.empty:
         # Convert date columns to datetime before editing
         for date_col in ['transaction_date', 'posting_date']:
