@@ -13,8 +13,20 @@ import hashlib
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import text
 
+# Set page config for wide layout and Material-like theme
+st.set_page_config(
+    layout="wide",
+    page_title="Transaction Dashboard",
+    page_icon="📊" # Optional: Add a page icon
+)
+
 def load_transactions(start_date=None, end_date=None, search_term=None, search_column=None, selected_categories=None, amount_range=None):
     """Load transactions with search and filter capabilities"""
+    # Check if user is logged in
+    if not st.session_state.get("user_id"):
+        st.error("Please log in to view transactions")
+        return pd.DataFrame()
+        
     session = SessionLocal()
     try:
         query = session.query(
@@ -30,6 +42,9 @@ def load_transactions(start_date=None, end_date=None, search_term=None, search_c
             Vendor,
             AccountTransaction.vendor_id == Vendor.vendor_id,
             isouter=True
+        ).filter(
+            # Add filter for current user's transactions
+            AccountTransaction.created_by == st.session_state["user_id"]
         )
         
         # Apply filters
@@ -85,18 +100,23 @@ def get_transaction_stats():
     return stats
 
 def check_existing_transaction(session, df_row):
-    """Check if a transaction already exists in the database"""
+    """Check if a transaction already exists in the database for the current user"""
     return session.query(AccountTransaction).filter(
         AccountTransaction.transaction_date == pd.to_datetime(df_row.get('transaction_date')),
         AccountTransaction.description == df_row.get('description'),
-        AccountTransaction.amount == df_row.get('amount')
+        AccountTransaction.amount == df_row.get('amount'),
+        AccountTransaction.created_by == st.session_state["user_id"]  # Add user filter
     ).first() is not None
 
 def store_transaction_in_db(df_row):
     """Store a single transaction row in the database with duplicate checking"""
+    # Check if user is logged in
+    if not st.session_state.get("user_id"):
+        return {'status': 'error', 'message': 'User not logged in'}
+        
     session = SessionLocal()
     try:
-        # Check for existing transaction
+        # Check for existing transaction for this user
         if check_existing_transaction(session, df_row):
             logging.info(f"Skipping duplicate transaction: {df_row.get('description')} on {df_row.get('transaction_date')}")
             return {'status': 'duplicate'}
@@ -107,13 +127,13 @@ def store_transaction_in_db(df_row):
             vendor = Vendor(
                 vendor_name=df_row.get('vendorName'),
                 vendor_code=df_row.get('vendorName')[:10],
-                created_by=1,
-                updated_by=1
+                created_by=st.session_state["user_id"],  # Use current user's ID
+                updated_by=st.session_state["user_id"]   # Use current user's ID
             )
             session.add(vendor)
             session.flush()
 
-        # Create transaction
+        # Create transaction with user ID
         transaction = AccountTransaction(
             description=df_row.get('description'),
             vendor_id=vendor.vendor_id,
@@ -122,8 +142,8 @@ def store_transaction_in_db(df_row):
             amount=df_row.get('amount'),
             category=df_row.get('category'),
             sale_type=df_row.get('type'),
-            created_by=1,
-            updated_by=1,
+            created_by=st.session_state["user_id"],  # Use current user's ID
+            updated_by=st.session_state["user_id"],  # Use current user's ID
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow()
         )
@@ -219,32 +239,46 @@ def process_csv_files(uploaded_files):
 
 def update_transaction(transaction_id, updated_data):
     """Update transaction in database"""
+    # Check if user is logged in
+    if not st.session_state.get("user_id"):
+        return False
+        
     session = SessionLocal()
     try:
-        transaction = session.query(AccountTransaction).filter_by(transaction_id=transaction_id).first()
-        if transaction:
-            for key, value in updated_data.items():
-                if key in ['transaction_date', 'posting_date']:
-                    value = pd.to_datetime(value)
-                if key == 'vendor_name':
-                    # Handle vendor update
-                    vendor = session.query(Vendor).filter_by(vendor_name=value).first()
-                    if not vendor:
-                        vendor = Vendor(
-                            vendor_name=value,
-                            vendor_code=value[:10],
-                            created_by=1,
-                            updated_by=1
-                        )
-                        session.add(vendor)
-                        session.flush()
-                    transaction.vendor_id = vendor.vendor_id
-                else:
-                    setattr(transaction, key, value)
+        # Add user check to ensure they own the transaction
+        transaction = session.query(AccountTransaction).filter(
+            AccountTransaction.transaction_id == transaction_id,
+            AccountTransaction.created_by == st.session_state["user_id"]  # Add user filter
+        ).first()
+        
+        if not transaction:
+            st.error("Transaction not found or you don't have permission to edit it")
+            return False
             
-            transaction.updated_at = datetime.utcnow()
-            session.commit()
-            return True
+        # Update the transaction
+        for key, value in updated_data.items():
+            if key in ['transaction_date', 'posting_date']:
+                value = pd.to_datetime(value)
+            if key == 'vendor_name':
+                # Handle vendor update
+                vendor = session.query(Vendor).filter_by(vendor_name=value).first()
+                if not vendor:
+                    vendor = Vendor(
+                        vendor_name=value,
+                        vendor_code=value[:10],
+                        created_by=st.session_state["user_id"],
+                        updated_by=st.session_state["user_id"]
+                    )
+                    session.add(vendor)
+                    session.flush()
+                transaction.vendor_id = vendor.vendor_id
+            else:
+                setattr(transaction, key, value)
+        
+        transaction.updated_at = datetime.utcnow()
+        transaction.updated_by = st.session_state["user_id"]  # Update the updater
+        session.commit()
+        return True
     except Exception as e:
         session.rollback()
         st.error(f"Error updating transaction: {e}")
@@ -755,6 +789,13 @@ def functions():
 
 def dashboard_page():
     """Main dashboard functionality"""
+    # Check if user is logged in
+    if not st.session_state.get("user_id"):
+        st.error("Please log in to view the dashboard")
+        st.session_state["page"] = "login"
+        st.rerun()
+        return
+        
     st.title("Transaction Analysis Dashboard")
     
     # Display user information and logout button in the sidebar

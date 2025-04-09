@@ -4,12 +4,31 @@ from datetime import datetime
 import os       
 from dotenv import load_dotenv
 
-# Load environment variables
+# Load environment variables from .env
 load_dotenv()
 
-# Database Configuration
-DATABASE_URL = f"postgresql://{os.getenv('POSTGRESQL_USER')}:{os.getenv('POSTGRESQL_PASSWORD')}@{os.getenv('POSTGRESQL_HOST')}:{os.getenv('POSTGRESQL_PORT')}/{os.getenv('POSTGRESQL_DB')}"
+# Fetch variables
+USER = os.getenv("POSTGRESQL_USER")
+PASSWORD = os.getenv("POSTGRESQL_PASSWORD")
+HOST = os.getenv("POSTGRESQL_HOST")
+PORT = os.getenv("POSTGRESQL_PORT")
+DBNAME = os.getenv("POSTGRESQL_DB")
 
+# Construct the SQLAlchemy connection string
+DATABASE_URL = f"postgresql+psycopg2://{USER}:{PASSWORD}@{HOST}:{PORT}/{DBNAME}"
+print(DATABASE_URL)
+# Create the SQLAlchemy engine
+engine = create_engine(DATABASE_URL)
+# If using Transaction Pooler or Session Pooler, we want to ensure we disable SQLAlchemy client side pooling -
+# https://docs.sqlalchemy.org/en/20/core/pooling.html#switching-pool-implementations
+# engine = create_engine(DATABASE_URL, poolclass=NullPool)
+
+# Test the connection
+try:
+    with engine.connect() as connection:
+        print("Connection successful!")
+except Exception as e:
+    print(f"Failed to connect: {e}")
 # Create SQLAlchemy Engine
 try:
     engine = create_engine(DATABASE_URL)
