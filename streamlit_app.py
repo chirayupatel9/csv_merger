@@ -256,26 +256,26 @@ def update_transaction(transaction_id, updated_data):
             return False
             
         # Update the transaction
-        for key, value in updated_data.items():
-            if key in ['transaction_date', 'posting_date']:
-                value = pd.to_datetime(value)
-            if key == 'vendor_name':
-                # Handle vendor update
-                vendor = session.query(Vendor).filter_by(vendor_name=value).first()
-                if not vendor:
-                    vendor = Vendor(
-                        vendor_name=value,
-                        vendor_code=value[:10],
+            for key, value in updated_data.items():
+                if key in ['transaction_date', 'posting_date']:
+                    value = pd.to_datetime(value)
+                if key == 'vendor_name':
+                    # Handle vendor update
+                    vendor = session.query(Vendor).filter_by(vendor_name=value).first()
+                    if not vendor:
+                        vendor = Vendor(
+                            vendor_name=value,
+                            vendor_code=value[:10],
                         created_by=st.session_state["user_id"],
                         updated_by=st.session_state["user_id"]
-                    )
-                    session.add(vendor)
-                    session.flush()
-                transaction.vendor_id = vendor.vendor_id
-            else:
-                setattr(transaction, key, value)
-        
-        transaction.updated_at = datetime.utcnow()
+                        )
+                        session.add(vendor)
+                        session.flush()
+                    transaction.vendor_id = vendor.vendor_id
+                else:
+                    setattr(transaction, key, value)
+            
+            transaction.updated_at = datetime.utcnow()
         transaction.updated_by = st.session_state["user_id"]  # Update the updater
         session.commit()
         return True
@@ -936,7 +936,7 @@ def dashboard_page():
         col2.metric("Total Amount", f"${transactions['amount'].sum():,.2f}")
         col3.metric("Average Amount", f"${transactions['amount'].mean():,.2f}")
 
-        # Vendor and Description Analysis Section
+# Vendor and Description Analysis Section
         st.subheader("Vendor and Description Analysis")
         
         tabs = st.tabs(["Combined Analysis", "Visualizations", "Pattern Search", "Vendor Details"])
@@ -1293,7 +1293,348 @@ def dashboard_page():
                 expense_breakdown['Total'] = expense_breakdown['Total'].apply(lambda x: f"${x:,.2f}")
                 st.dataframe(expense_breakdown)
 
+        # Add Year-to-Date Profit/Loss Analysis Section
+        st.subheader("Year-to-Date Profit & Loss")
         
+        # Calculate current year
+        current_year = datetime.now().year
+        
+        # Filter for current year transactions
+        ytd_transactions = transactions[transactions['transaction_date'].dt.year == current_year]
+        
+        if not ytd_transactions.empty:
+            # Split into income and expenses
+            income = ytd_transactions[ytd_transactions['amount'] >= 0]
+            expenses = ytd_transactions[ytd_transactions['amount'] < 0]
+            
+            # Calculate profit/loss metrics
+            total_income = income['amount'].sum()
+            total_expenses = abs(expenses['amount'].sum())
+            net_profit = total_income - total_expenses
+            
+            # Create columns for metrics
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric(
+                    "Total Income YTD",
+                    f"${total_income:,.2f}",
+                    delta=None
+                )
+            
+            with col2:
+                st.metric(
+                    "Total Expenses YTD",
+                    f"${total_expenses:,.2f}",
+                    delta=None,
+                    delta_color="inverse"  # Inverse to show expenses in red
+                )
+            
+            with col3:
+                st.metric(
+                    "Net Profit/Loss YTD",
+                    f"${net_profit:,.2f}",
+                    delta=net_profit,
+                    delta_color="normal"  # Positive profit in green, negative in red
+                )
+            
+            # Create tabs for different visualizations
+            profit_loss_tabs = st.tabs(["Monthly Breakdown", "Category Analysis", "Year Comparison"])
+            
+            with profit_loss_tabs[0]:
+                # Monthly profit/loss chart
+                monthly_pl = ytd_transactions.groupby(
+                    ytd_transactions['transaction_date'].dt.strftime('%Y-%m')
+                )['amount'].sum().reset_index()
+                monthly_pl.columns = ['Month', 'Net']
+                
+                # Calculate income and expenses per month
+                monthly_income = income.groupby(
+                    income['transaction_date'].dt.strftime('%Y-%m')
+                )['amount'].sum().reset_index()
+                monthly_income.columns = ['Month', 'Income']
+                
+                monthly_expenses = expenses.groupby(
+                    expenses['transaction_date'].dt.strftime('%Y-%m')
+                )['amount'].sum().reset_index()
+                monthly_expenses.columns = ['Month', 'Expenses']
+                monthly_expenses['Expenses'] = monthly_expenses['Expenses'] * -1  # Convert to positive for visualization
+                
+                # Merge dataframes
+                monthly_combined = pd.merge(monthly_income, monthly_expenses, on='Month', how='outer').fillna(0)
+                monthly_combined['Net'] = monthly_combined['Income'] - monthly_combined['Expenses']
+                
+                # Create the figure
+                fig_monthly_pl = go.Figure()
+                
+                # Add traces
+                fig_monthly_pl.add_trace(
+                    go.Bar(
+                        x=monthly_combined['Month'],
+                        y=monthly_combined['Income'],
+                        name='Income',
+                        marker_color='#2ECC71'  # Green
+                    )
+                )
+                
+                fig_monthly_pl.add_trace(
+                    go.Bar(
+                        x=monthly_combined['Month'],
+                        y=monthly_combined['Expenses'],
+                        name='Expenses',
+                        marker_color='#E74C3C'  # Red
+                    )
+                )
+                
+                fig_monthly_pl.add_trace(
+                    go.Scatter(
+                        x=monthly_combined['Month'],
+                        y=monthly_combined['Net'],
+                        name='Net Profit/Loss',
+                        line=dict(color='#3498DB', width=3)  # Blue line
+                    )
+                )
+                
+                # Update layout
+                fig_monthly_pl.update_layout(
+                    title=f'Monthly Profit & Loss ({current_year})',
+                    barmode='group',
+                    xaxis_title='Month',
+                    yaxis_title='Amount ($)',
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.02,
+                        xanchor="right",
+                        x=1
+                    )
+                )
+                
+                st.plotly_chart(fig_monthly_pl, use_container_width=True)
+                
+                # Display detailed table with monthly breakdown
+                st.markdown("### Monthly Profit & Loss Breakdown")
+                
+                # Format the table for display
+                display_monthly = monthly_combined.copy()
+                for col in ['Income', 'Expenses', 'Net']:
+                    display_monthly[col] = display_monthly[col].apply(lambda x: f"${x:,.2f}")
+                
+                st.dataframe(
+                    display_monthly,
+                    hide_index=True,
+                    column_config={
+                        "Month": "Month",
+                        "Income": "Income",
+                        "Expenses": "Expenses",
+                        "Net": "Net Profit/Loss"
+                    }
+                )
+            
+            with profit_loss_tabs[1]:
+                # Category profit/loss analysis
+                st.markdown("### Profit & Loss by Category")
+                
+                # Income by category
+                income_by_category = income.groupby('category')['amount'].sum().reset_index()
+                income_by_category.columns = ['Category', 'Income']
+                
+                # Expenses by category
+                expenses_by_category = expenses.groupby('category')['amount'].sum().reset_index()
+                expenses_by_category.columns = ['Category', 'Expenses']
+                expenses_by_category['Expenses'] = expenses_by_category['Expenses'] * -1  # Convert to positive
+                
+                # Create two columns for side-by-side display
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("#### Top Income Categories")
+                    fig_income = px.pie(
+                        income_by_category.sort_values('Income', ascending=False).head(5),
+                        values='Income',
+                        names='Category',
+                        title='Top 5 Income Categories',
+                        color_discrete_sequence=px.colors.sequential.Greens
+                    )
+                    st.plotly_chart(fig_income)
+                
+                with col2:
+                    st.markdown("#### Top Expense Categories")
+                    fig_expenses = px.pie(
+                        expenses_by_category.sort_values('Expenses', ascending=False).head(5),
+                        values='Expenses',
+                        names='Category',
+                        title='Top 5 Expense Categories',
+                        color_discrete_sequence=px.colors.sequential.Reds
+                    )
+                    st.plotly_chart(fig_expenses)
+                
+                # Create category net profit/loss chart
+                # Merge income and expenses
+                category_combined = pd.merge(
+                    income_by_category, 
+                    expenses_by_category, 
+                    on='Category', 
+                    how='outer'
+                ).fillna(0)
+                
+                category_combined['Net'] = category_combined['Income'] - category_combined['Expenses']
+                category_combined = category_combined.sort_values('Net', ascending=False)
+                
+                # Create figure
+                fig_category_pl = px.bar(
+                    category_combined,
+                    x='Category',
+                    y='Net',
+                    title='Net Profit/Loss by Category',
+                    color='Net',
+                    color_continuous_scale=['#E74C3C', '#FFFFFF', '#2ECC71'],  # Red to green
+                    range_color=[-max(abs(category_combined['Net'])), max(abs(category_combined['Net']))]
+                )
+                
+                st.plotly_chart(fig_category_pl, use_container_width=True)
+                
+                # Display detailed table
+                st.markdown("### Category Profit & Loss Details")
+                display_category = category_combined.copy()
+                for col in ['Income', 'Expenses', 'Net']:
+                    display_category[col] = display_category[col].apply(lambda x: f"${x:,.2f}")
+                
+                st.dataframe(
+                    display_category,
+                    hide_index=True
+                )
+            
+            with profit_loss_tabs[2]:
+                # Year comparison (if previous year data exists)
+                previous_year = current_year - 1
+                prev_year_transactions = transactions[transactions['transaction_date'].dt.year == previous_year]
+                
+                if not prev_year_transactions.empty:
+                    st.markdown(f"### Year-over-Year Comparison ({previous_year} vs {current_year})")
+                    
+                    # Calculate previous year metrics
+                    prev_income = prev_year_transactions[prev_year_transactions['amount'] >= 0]
+                    prev_expenses = prev_year_transactions[prev_year_transactions['amount'] < 0]
+                    prev_total_income = prev_income['amount'].sum()
+                    prev_total_expenses = abs(prev_expenses['amount'].sum())
+                    prev_net_profit = prev_total_income - prev_total_expenses
+                    
+                    # Calculate year-over-year changes
+                    income_change = total_income - prev_total_income
+                    expenses_change = total_expenses - prev_total_expenses
+                    profit_change = net_profit - prev_net_profit
+                    
+                    # Create columns for metrics with deltas
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric(
+                            "Income YoY Comparison",
+                            f"${total_income:,.2f}",
+                            delta=f"${income_change:,.2f} ({income_change/prev_total_income*100:.1f}%)",
+                            delta_color="normal"
+                        )
+                    
+                    with col2:
+                        st.metric(
+                            "Expenses YoY Comparison",
+                            f"${total_expenses:,.2f}",
+                            delta=f"${expenses_change:,.2f} ({expenses_change/prev_total_expenses*100:.1f}%)",
+                            delta_color="inverse"  # Lower expenses is good
+                        )
+                    
+                    with col3:
+                        st.metric(
+                            "Profit YoY Comparison",
+                            f"${net_profit:,.2f}",
+                            delta=f"${profit_change:,.2f} ({profit_change/abs(prev_net_profit)*100:.1f}%)" if prev_net_profit != 0 else f"${profit_change:,.2f}",
+                            delta_color="normal"
+                        )
+                    
+                    # Create year-over-year comparison chart
+                    # Prepare data by month for both years
+                    current_monthly = ytd_transactions.groupby(
+                        ytd_transactions['transaction_date'].dt.strftime('%m')
+                    )['amount'].sum().reset_index()
+                    current_monthly.columns = ['Month', f'{current_year}']
+                    
+                    prev_monthly = prev_year_transactions.groupby(
+                        prev_year_transactions['transaction_date'].dt.strftime('%m')
+                    )['amount'].sum().reset_index()
+                    prev_monthly.columns = ['Month', f'{previous_year}']
+                    
+                    # Merge the data
+                    yoy_comparison = pd.merge(prev_monthly, current_monthly, on='Month', how='outer').fillna(0)
+                    
+                    # Convert month numbers to month names
+                    month_names = {
+                        '01': 'Jan', '02': 'Feb', '03': 'Mar', '04': 'Apr', '05': 'May', '06': 'Jun',
+                        '07': 'Jul', '08': 'Aug', '09': 'Sep', '10': 'Oct', '11': 'Nov', '12': 'Dec'
+                    }
+                    yoy_comparison['Month'] = yoy_comparison['Month'].map(month_names)
+                    
+                    # Create figure
+                    fig_yoy = go.Figure()
+                    
+                    # Add bars for each year
+                    fig_yoy.add_trace(
+                        go.Bar(
+                            x=yoy_comparison['Month'],
+                            y=yoy_comparison[f'{previous_year}'],
+                            name=f'{previous_year}',
+                            marker_color='#AED6F1'  # Light blue
+                        )
+                    )
+                    
+                    fig_yoy.add_trace(
+                        go.Bar(
+                            x=yoy_comparison['Month'],
+                            y=yoy_comparison[f'{current_year}'],
+                            name=f'{current_year}',
+                            marker_color='#3498DB'  # Darker blue
+                        )
+                    )
+                    
+                    # Update layout
+                    fig_yoy.update_layout(
+                        title='Net Profit/Loss by Month - Year over Year',
+                        barmode='group',
+                        xaxis={'categoryorder':'array', 'categoryarray':list(month_names.values())},
+                        yaxis_title='Amount ($)'
+                    )
+                    
+                    st.plotly_chart(fig_yoy, use_container_width=True)
+                    
+                    # Calculate and show month-by-month growth rates
+                    st.markdown("### Month-by-Month Growth Rates")
+                    
+                    # Add month names and calculate growth
+                    yoy_comparison['Growth'] = ((yoy_comparison[f'{current_year}'] - yoy_comparison[f'{previous_year}']) / 
+                                               yoy_comparison[f'{previous_year}'] * 100).replace([np.inf, -np.inf], np.nan)
+                    
+                    # Display the growth rates
+                    growth_df = yoy_comparison[['Month', f'{previous_year}', f'{current_year}', 'Growth']].copy()
+                    # Format monetary values
+                    growth_df[f'{previous_year}'] = growth_df[f'{previous_year}'].apply(lambda x: f"${x:,.2f}")
+                    growth_df[f'{current_year}'] = growth_df[f'{current_year}'].apply(lambda x: f"${x:,.2f}")
+                    # Format growth percentage
+                    growth_df['Growth'] = growth_df['Growth'].apply(lambda x: f"{x:.1f}%" if not pd.isna(x) else "N/A")
+                    
+                    st.dataframe(
+                        growth_df,
+                        hide_index=True,
+                        column_config={
+                            "Month": "Month",
+                            f"{previous_year}": f"Net P/L {previous_year}",
+                            f"{current_year}": f"Net P/L {current_year}",
+                            "Growth": "Growth Rate"
+                        }
+                    )
+                else:
+                    st.info(f"No transaction data available for {previous_year} to make a year-over-year comparison.")
+        else:
+            st.info(f"No transaction data available for {current_year} yet.")
     else:
         st.info("No transactions found for the selected criteria.")
 
