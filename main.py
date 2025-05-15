@@ -5,7 +5,6 @@ from datetime import datetime
 import re
 import sys
 import logging
-from dbmodels import SessionLocal, AccountTransaction, Vendor
 
 # Setup logging
 log_file = "process_log.txt"
@@ -26,116 +25,92 @@ header_mapping = load_header_mapping()
 def process_string(s):
     if isinstance(s, float) or s == "":
         return s  # Ignore empty strings and floats
-    return s[1:] if isinstance(s, str) and s.startswith('$') else s
+    if isinstance(s, str):
+        # Remove all special characters except numbers, decimal point, and minus sign
+        s = re.sub(r'[^\d.-]', '', s)
+        # Handle multiple decimal points by keeping only the first one
+        parts = s.split('.')
+        if len(parts) > 2:
+            s = parts[0] + '.' + ''.join(parts[1:])
+        # Convert to float to ensure proper numeric format
+        try:
+            return float(s)
+        except ValueError:
+            return s
+    return s
 
-
-def store_transaction_in_db(df_row):
-    """Store a single transaction row in the database with duplicate checking"""
-    session = SessionLocal()
-    try:
-        # Check for existing transaction with same details
-        existing_transaction = session.query(AccountTransaction).filter(
-            AccountTransaction.transaction_date == pd.to_datetime(df_row.get('transaction_date')),
-            AccountTransaction.posting_date == pd.to_datetime(df_row.get('posting_date')),
-            AccountTransaction.amount == df_row.get('amount'),
-            AccountTransaction.description == df_row.get('description')
-        ).first()
-
-        if existing_transaction:
-            logging.info(f"Skipping duplicate transaction: {df_row.get('description')} on {df_row.get('transaction_date')}")
-            return False
-
-        # First, create or get vendor
-        vendor = session.query(Vendor).filter_by(vendor_name=df_row.get('vendorName')).first()
-        if not vendor:
-            vendor = Vendor(
-                vendor_name=df_row.get('vendorName'),
-                vendor_code=df_row.get('vendorName')[:10],  # Simple vendor code generation
-                created_by=1,  # Default user ID
-                updated_by=1   # Default user ID
-            )
-            session.add(vendor)
-            session.flush()  # To get vendor_id
-
-        # Create transaction
-        transaction = AccountTransaction(
-            description=df_row.get('description'),
-            vendor_id=vendor.vendor_id,
-            posting_date=pd.to_datetime(df_row.get('posting_date')),
-            transaction_date=pd.to_datetime(df_row.get('transaction_date')),
-            amount=df_row.get('amount'),
-            category=df_row.get('category'),
-            sale_type=df_row.get('type'),  # Credit/Debit
-            created_by=1,  # Default user ID
-            updated_by=1,  # Default user ID
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
-        )
-        session.add(transaction)
-        session.commit()
-        return True
-        
-    except Exception as e:
-        session.rollback()
-        logging.error(f"Error storing transaction in database: {e}")
-        raise e
-    finally:
-        session.close()
+def clean_amount_column(df, column_name):
+    """Helper function to clean amount columns"""
+    if column_name in df.columns:
+        df[column_name] = df[column_name].astype(str).apply(process_string)
+        df[column_name] = pd.to_numeric(df[column_name], errors='coerce')
+    return df
 
 def read_all_csv_from_folder(folder_path):
-    """Modified version to include database storage with duplicate checking"""
+    """
+    Reads all CSV files from the given folder path and processes them.
+    Combines processed CSVs into one output CSV.
+    """
     all_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.lower().endswith('.csv')]
     combined_df = pd.DataFrame()
     processed_folder = os.path.join(folder_path, 'processed_csv')
     already_processed_folder = os.path.join(folder_path, 'already_processed')
     not_processed_folder = os.path.join(folder_path, 'not_processed')
-    
     os.makedirs(processed_folder, exist_ok=True)
     os.makedirs(already_processed_folder, exist_ok=True)
     os.makedirs(not_processed_folder, exist_ok=True)
-    
-    transaction_stats = {
-        'total': 0,
-        'duplicates': 0,
-        'successful': 0,
-        'failed': 0
-    }
     
     for file in all_files:
         try:
             logging.info(f"Processing file: {file}")
             df = csv_reader(file)
-            combined_df = pd.concat([combined_df, df], ignore_index=False)
-            
-            # Move processed file
-            os.rename(file, os.path.join(already_processed_folder, os.path.basename(file)))
+            if not df.empty:
+                logging.info(f"df.columns in main: {df.columns} for {file}")
+                for i,row in df.iterrows():
+                    logging.info(f"i: {i} row: {row} for {file}")
+                combined_df = pd.concat([combined_df, df], ignore_index=True)
+            os.rename(file, os.path.join(already_processed_folder, os.path.basename(file)))  # Move processed file
         except Exception as e:
+            print(f"Error processing file {file}: {e}")
             logging.error(f"Error processing file {file}: {e}")
-            # Move failed file to not_processed folder
-            os.rename(file, os.path.join(not_processed_folder, os.path.basename(file)))
-            continue
-
+    
     if not combined_df.empty:
+        # Remove rows where all values are NaN or empty
+        combined_df = combined_df.dropna(how='all')
+        # Remove rows where all values are empty strings
+        combined_df = combined_df[~combined_df.astype(str).apply(lambda x: x.str.strip().eq('').all(), axis=1)]
+        
+        # Drop rows where amount is empty, NaN, or 0
+        if 'amount' in combined_df.columns:
+            combined_df = combined_df.dropna(subset=['amount'])
+            combined_df = combined_df[combined_df['amount'] != 0]
+            combined_df = combined_df[combined_df['amount'].astype(str).str.strip() != '']
+        
+        # Replace NaN values with empty strings
+        combined_df = combined_df.fillna('')
+        
+        # Ensure 'card' column is string to preserve leading zeros
+        if 'card' in combined_df.columns:
+            combined_df['card'] = combined_df['card'].astype(str)
+            
+        # Ensure the columns are in the specified order
+        desired_order = ['posting_date', 'description', 'balance', 'amount', 'transaction_date', 'type', 'category', 'vendorName', 'card']
+        for col in desired_order:
+            if col not in combined_df.columns:
+                combined_df[col] = ''
+        combined_df = combined_df[desired_order]
+        
+        # Final cleanup of empty rows
+        combined_df = combined_df.dropna(how='all')
+        combined_df = combined_df[~combined_df.astype(str).apply(lambda x: x.str.strip().eq('').all(), axis=1)]
+        
         output_file = os.path.join(processed_folder, 'combined_output.csv')
         combined_df.to_csv(output_file, index=False)
-        
-        # Store each row in database
-        for _, row in combined_df.iterrows():
-            transaction_stats['total'] += 1
-            try:
-                is_stored = store_transaction_in_db(row)
-                if is_stored:
-                    transaction_stats['successful'] += 1
-                else:
-                    transaction_stats['duplicates'] += 1
-            except Exception as e:
-                transaction_stats['failed'] += 1
-                logging.error(f"Failed to store row in database: {e}")
-                continue
-        
-        logging.info(f"Processing complete. Stats: {transaction_stats}")
-        return transaction_stats
-    return transaction_stats
+        print(f"Combined CSV saved at: {output_file}")
+        logging.info(f"Combined CSV saved at: {output_file}")
+    else:
+        logging.warning("No CSV files found or processed successfully.")
+        print("No CSV files found or processed successfully.")
 
 def csv_reader(csv_file_path, read_line=0):
     """
@@ -147,6 +122,11 @@ def csv_reader(csv_file_path, read_line=0):
     - Extracts vendor name.
     """
     df = mapper(csv_file_path, read_line)
+    
+    # Remove rows where all values are NaN or empty strings
+    df = df.dropna(how='all')
+    df = df[~df.astype(str).apply(lambda x: x.str.strip().eq('').all(), axis=1)]
+    
     date_columns = ["posting_date", "transaction_date"]
     
     # If transaction_date doesn't exist, copy posting_date (if available)
@@ -155,12 +135,7 @@ def csv_reader(csv_file_path, read_line=0):
     
     for col in date_columns:
         if col in df.columns:
-            # Convert dates and handle errors
-            df[col] = df[col].apply(convert_to_yyyy_mm_dd)
-            # Remove any rows where date conversion failed
-            df = df.dropna(subset=[col])
-            # Convert to datetime type for proper sorting
-            df[col] = pd.to_datetime(df[col])
+            df[col] = df[col].apply(lambda x: convert_to_yyyy_mm_dd(x) if isinstance(x, str) else x)
     
     # Create the unified amount column from amount_c and amount_d if they exist.
     if "amount_c" in df.columns or "amount_d" in df.columns:
@@ -170,6 +145,14 @@ def csv_reader(csv_file_path, read_line=0):
             df["amount"] = df["amount_c"]
         elif "amount_d" in df.columns:
             df["amount"] = -df["amount_d"]
+        
+        # Clean the amount column
+        df = clean_amount_column(df, "amount")
+        
+        # Drop rows where amount is empty, NaN, or 0
+        df = df.dropna(subset=['amount'])
+        df = df[df['amount'] != 0]
+        df = df[df['amount'].astype(str).str.strip() != '']
     
     if "type" not in df.columns and "amount" in df.columns:
         df["type"] = df["amount"].apply(lambda x: "Credit" if x >= 0 else "Debit")
@@ -178,6 +161,11 @@ def csv_reader(csv_file_path, read_line=0):
         df["category"] = "No Category Mentioned"
     if "description" in df.columns:
         df["vendorName"] = df["description"].apply(lambda x: strip_vendor(x) if pd.notna(x) else "")
+    
+    # Final cleanup of empty rows
+    df = df.dropna(how='all')
+    df = df[~df.astype(str).apply(lambda x: x.str.strip().eq('').all(), axis=1)]
+    
     return df
 
 def mapper(csv_file_path, read_line=0):
@@ -189,9 +177,7 @@ def mapper(csv_file_path, read_line=0):
     df = pd.read_csv(csv_file_path, index_col=False, skiprows=read_line)
     
     # Normalize header names
-    print(f"df.columns normalized: {df.columns}")
     normalized_columns = [str(col).lower().replace(" ", "") for col in df.columns]
-    print(f"df.columns normalized: {df.columns}")
     df.columns = normalized_columns
     
     # Build reverse mapping from header_mapping
@@ -200,7 +186,6 @@ def mapper(csv_file_path, read_line=0):
         for alt in alt_names:
             alt_norm = alt.lower().replace(" ", "")
             reverse_mapping[alt_norm] = std_name
-
     new_columns = []
     seen_columns = set()  # Keep track of column names already assigned
     
@@ -236,16 +221,13 @@ def mapper(csv_file_path, read_line=0):
             new_columns.append(new_col)
             seen_columns.add(new_col)
     
-    print(f"new_columns: {new_columns}")
     df.columns = new_columns
 
-    # Convert amount_c and amount_d to numeric if they exist.
-    if "amount_c" in df.columns:
-        df["amount_c"] = df["amount_c"].apply(process_string)
-        df["amount_c"] = pd.to_numeric(df["amount_c"], errors='coerce')
-    if "amount_d" in df.columns:
-        df["amount_d"] = df["amount_d"].apply(process_string)
-        df["amount_d"] = pd.to_numeric(df["amount_d"], errors='coerce')
+    # Clean amount columns
+    df = clean_amount_column(df, "amount_c")
+    df = clean_amount_column(df, "amount_d")
+    df = clean_amount_column(df, "amount")
+    df = clean_amount_column(df, "balance")
     
     logging.info(f"df.columns in mapper: {df}")
     return df
@@ -253,61 +235,9 @@ def mapper(csv_file_path, read_line=0):
 def convert_to_yyyy_mm_dd(date_str):
     """
     Converts various date formats into YYYY-MM-DD format.
-    Handles common date formats including:
-    - MM/DD/YYYY
-    - DD/MM/YYYY
-    - MM-DD-YYYY
-    - DD-MM-YYYY
-    - YYYY/MM/DD
-    - YYYY-MM-DD
-    - Month DD, YYYY
-    - DD Month YYYY
+    Currently returns the input; extend with actual conversion logic as needed.
     """
-    if pd.isna(date_str) or date_str == '':
-        return None
-        
-    try:
-        # If already datetime, convert to string format
-        if isinstance(date_str, (datetime, pd.Timestamp)):
-            return date_str.strftime('%Y-%m-%d')
-            
-        # Remove any leading/trailing whitespace
-        date_str = str(date_str).strip()
-        
-        # Try common date formats
-        common_formats = [
-            '%Y-%m-%d',      # 2024-03-14
-            '%m/%d/%Y',      # 03/14/2024
-            '%d/%m/%Y',      # 14/03/2024
-            '%m-%d-%Y',      # 03-14-2024
-            '%d-%m-%Y',      # 14-03-2024
-            '%Y/%m/%d',      # 2024/03/14
-            '%B %d, %Y',     # March 14, 2024
-            '%d %B %Y',      # 14 March 2024
-            '%b %d, %Y',     # Mar 14, 2024
-            '%d %b %Y',      # 14 Mar 2024
-            '%Y%m%d',        # 20240314
-            '%m/%d/%y',      # 03/14/24
-            '%d/%m/%y',      # 14/03/24
-            '%m-%d-%y',      # 03-14-24
-            '%d-%m-%y',      # 14-03-24
-        ]
-        
-        # Try each format
-        for date_format in common_formats:
-            try:
-                parsed_date = datetime.strptime(date_str, date_format)
-                return parsed_date.strftime('%Y-%m-%d')
-            except ValueError:
-                continue
-                
-        # If no format works, try pandas to_datetime as a fallback
-        parsed_date = pd.to_datetime(date_str)
-        return parsed_date.strftime('%Y-%m-%d')
-        
-    except Exception as e:
-        logging.error(f"Error converting date {date_str}: {str(e)}")
-        return None
+    return date_str
 
 # Precompile regex pattern for vendor extraction.
 key = '|'.join(["DES:", "from", "transfer", " in ", "Deposit", "ATM", ','])
@@ -353,9 +283,9 @@ def strip_vendor(strings="Not Available"):
     return vendor_name
 
 # Example usage
-# if __name__ == "__main__":
-#     exe_folder_path = os.path.dirname(os.path.abspath(sys.executable)) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
-#     data_folder_path = os.path.join(exe_folder_path, 'data')
-#     logging.info(f"Looking for CSV files in: {data_folder_path}")
-#     print(f"Looking for CSV files in: {data_folder_path}")
-#     read_all_csv_from_folder(data_folder_path)
+if __name__ == "__main__":
+    exe_folder_path = os.path.dirname(os.path.abspath(sys.executable)) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+    data_folder_path = os.path.join(exe_folder_path, 'data')
+    logging.info(f"Looking for CSV files in: {data_folder_path}")
+    print(f"Looking for CSV files in: {data_folder_path}")
+    read_all_csv_from_folder(data_folder_path)
